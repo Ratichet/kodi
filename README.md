@@ -1,4 +1,4 @@
-# Cahier des charges — EpiKodi (simili Kodi)
+# Cahier des charges — EpiKodi
 
 Projet solo - Quentin Lecourt   
 Durée indicative : 8-12 semaines
