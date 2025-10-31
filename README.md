@@ -24,14 +24,12 @@ EpiKodi est une application media center inspirée de Kodi, visant à indexer de
 - Playlists et file d’attente
 - Thèmes personnalisables
 - Support musique enrichi (tags ID3, pochettes, artistes, albums)
-- Casting local (DLNA / Chromecast) selon la stack choisie
+- PVR / TV en direct, torrenting
 
-### Non livrable
-- PVR / TV en direct, torrenting, extensions tierces non contrôlées
+### LA FLEEEEEEEME
 - DRM / streaming de plateformes commerciales (Netflix, Prime Video, etc.)
 - Synchronisation cloud
 
-## 3. Travailleurs
-- Réalisateur : Quentin Lecourt (chef de projet & dev unique)
+## 3. Equipe
+- Stagiaire : Quentin Lecourt (chef de projet & dev unique)
 - Encadrant : Joffrey Riela
-- Utilisateurs cibles : utilisateurs desktop gérant une médiathèque locale
