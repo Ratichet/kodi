@@ -1,7 +1,7 @@
 # Cahier des charges — EpiKodi
 
 Projet solo - Quentin Lecourt   
-Durée indicative : 8-12 semaines
+Durée indicative : 4 mois
 
 ## 1. Contexte & objectifs
 EpiKodi est une application media center inspirée de Kodi, visant à indexer des médias locaux (films, séries, musique), récupérer leurs métadonnées en ligne et offrir une lecture fluide sur desktop. Objectif : livrer un simili Kodi robuste, fonctionnel et extensible.
