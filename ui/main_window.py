@@ -1,7 +1,9 @@
+from pathlib import Path
 import sys
 from PySide6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, 
                                 QPushButton, QWidget, QFileDialog, QLabel, QSlider, QStyle)
 from PySide6.QtCore import Qt, QTimer, QPoint
+
 from ui.widgets.video_widget import VideoWidget
 
 class MainWindow(QMainWindow):
@@ -65,14 +67,14 @@ class MainWindow(QMainWindow):
         self.timer.start()
 
         self.is_user_seeking = False
-
     def open_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "choose media file")
-        if file_path:
-            media = self.video_widget.instance.media_new(file_path)
-            self.video_widget.player.set_media(media)
-            self.video_widget.player.play()
-            self.btn_play.setText("Pause")
+            start_dir = str(Path.home() / "Videos")
+            file_path, _ = QFileDialog.getOpenFileName(self, "choose media file", start_dir)
+            if file_path:
+                media = self.video_widget.instance.media_new(file_path)
+                self.video_widget.player.set_media(media)
+                self.video_widget.player.play()
+                self.btn_play.setText("Pause")
 
     def toggle_play(self):
         if self.video_widget.player.is_playing():
