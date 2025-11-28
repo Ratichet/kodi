@@ -1,129 +1,285 @@
+import logging
 from pathlib import Path
-import sys
-from PySide6.QtWidgets import (QMainWindow, QVBoxLayout, QHBoxLayout, 
-                                QPushButton, QWidget, QFileDialog, QLabel, QSlider, QStyle)
-from PySide6.QtCore import Qt, QTimer, QPoint
+from PySide6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QPushButton, QLabel, QStackedWidget, QFrame, QFileDialog
+)
+from PySide6.QtCore import Qt
 
-from ui.widgets.video_widget import VideoWidget
+from core.services.media_service import MediaService
+
+from ui.styles import get_dark_theme
+from ui.views.home_view import HomeView
+from ui.views.movies_view import MoviesView
+from ui.views.series_view import SeriesView
+from ui.views.detail_view import DetailView
+from ui.views.player_view import PlayerView
+from ui.views.settings_view import SettingsView
+
+logger = logging.getLogger(__name__)
+
+VIEW_HOME = 0
+VIEW_MOVIES = 1
+VIEW_SERIES = 2
+VIEW_DETAIL = 3
+VIEW_PLAYER = 4
+VIEW_SETTINGS = 5
+
 
 class MainWindow(QMainWindow):
+
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("EpiKodi - MVP")
-        self.resize(1000, 700)
-        self.setStyleSheet("background-color: #1e1e1e;")
+        self.setWindowTitle("EpiKodi")
+        self.resize(1200, 750)
+        self.setMinimumSize(900, 550)
 
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        self.main_layout = QVBoxLayout(central_widget)
-        self.main_layout.setContentsMargins(0, 0, 0, 0)
-        self.main_layout.setSpacing(0)
+        self.setStyleSheet(get_dark_theme())
 
-        self.video_widget = VideoWidget()
-        self.main_layout.addWidget(self.video_widget, stretch=1)
+        self._media_service = MediaService()
 
-        self.controls_container = QWidget()
-        self.controls_container.setFixedHeight(80)
-        self.controls_container.setStyleSheet("background-color: #2d2d2d; color: white;")
-        self.controls_layout = QVBoxLayout(self.controls_container)
-        
+        central = QWidget()
+        self.setCentralWidget(central)
+        main_layout = QHBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        self.seek_slider = QSlider(Qt.Horizontal)
-        self.seek_slider.setRange(0, 1000)
-        self.seek_slider.sliderPressed.connect(self.on_slider_pressed)
-        self.seek_slider.sliderReleased.connect(self.on_slider_released)
-        self.seek_slider.sliderMoved.connect(self.on_slider_moved)
-        self.controls_layout.addWidget(self.seek_slider)
+        sidebar = QWidget()
+        sidebar.setObjectName("sidebar")
+        sidebar.setFixedWidth(200)
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(12, 16, 12, 16)
+        sidebar_layout.setSpacing(4)
 
-        self.buttons_layout = QHBoxLayout()
-        self.controls_layout.addLayout(self.buttons_layout)
+        logo = QLabel("⬡ EpiKodi")
+        logo.setObjectName("logo_label")
+        logo.setAlignment(Qt.AlignCenter)
+        sidebar_layout.addWidget(logo)
+        sidebar_layout.addSpacing(24)
 
-        self.btn_play = QPushButton("Lecture")
-        self.btn_play.clicked.connect(self.toggle_play)
-        self.buttons_layout.addWidget(self.btn_play)
+        self._nav_buttons = []
+        nav_items = [
+            ("🏠  Accueil", VIEW_HOME),
+            ("🎬  Films", VIEW_MOVIES),
+            ("📺  Séries", VIEW_SERIES),
+            ("⚙  Paramètres", VIEW_SETTINGS),
+        ]
 
-        self.time_label = QLabel("00:00:00 / 00:00:00")
-        self.time_label.setStyleSheet("color: #aaaaaa; margin-left: 10px; font-family: monospace;")
-        self.buttons_layout.addWidget(self.time_label)
-        self.buttons_layout.addStretch()
-        self.btn_open = QPushButton("Open Media")
-        self.btn_open.clicked.connect(self.open_file)
-        self.buttons_layout.addWidget(self.btn_open)
+        for text, view_idx in nav_items:
+            btn = QPushButton(text)
+            btn.setObjectName("nav_button")
+            btn.clicked.connect(lambda checked=False, idx=view_idx: self._navigate(idx))
+            sidebar_layout.addWidget(btn)
+            self._nav_buttons.append((btn, view_idx))
 
-        self.buttons_layout.addStretch()
-        self.buttons_layout.addWidget(QLabel("Vol:"))
-        self.vol_slider = QSlider(Qt.Horizontal)
-        self.vol_slider.setRange(0, 100)
-        self.vol_slider.setValue(50)
-        self.vol_slider.setFixedWidth(100)
-        self.vol_slider.valueChanged.connect(self.set_volume)
-        self.buttons_layout.addWidget(self.vol_slider)
+        sidebar_layout.addStretch()
 
-        self.main_layout.addWidget(self.controls_container)
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet("color: #2a3450;")
+        sidebar_layout.addWidget(sep)
+        sidebar_layout.addSpacing(8)
 
-        self.timer = QTimer(self)
-        self.timer.setInterval(200)
-        self.timer.timeout.connect(self.update_ui)
-        self.timer.start()
+        btn_open = QPushButton("📂  Ouvrir un fichier")
+        btn_open.setObjectName("secondary_button")
+        btn_open.clicked.connect(self._open_file)
+        sidebar_layout.addWidget(btn_open)
+        sidebar_layout.addSpacing(4)
 
-        self.is_user_seeking = False
-    def open_file(self):
-            start_dir = str(Path.home() / "Videos")
-            file_path, _ = QFileDialog.getOpenFileName(self, "choose media file", start_dir)
-            if file_path:
-                media = self.video_widget.instance.media_new(file_path)
-                self.video_widget.player.set_media(media)
-                self.video_widget.player.play()
-                self.btn_play.setText("Pause")
+        self._stats_label = QLabel("Bibliothèque vide")
+        self._stats_label.setObjectName("subtitle")
+        self._stats_label.setAlignment(Qt.AlignCenter)
+        self._stats_label.setWordWrap(True)
+        sidebar_layout.addWidget(self._stats_label)
 
-    def toggle_play(self):
-        if self.video_widget.player.is_playing():
-            self.video_widget.player.pause()
-            self.btn_play.setText("play")
+        main_layout.addWidget(sidebar)
+
+        self._stack = QStackedWidget()
+        self._stack.setObjectName("content_area")
+
+        self._home_view = HomeView()
+        self._home_view.media_clicked.connect(self._on_media_clicked)
+        self._home_view.media_play.connect(self._on_media_play)
+
+        self._movies_view = MoviesView()
+        self._movies_view.media_clicked.connect(self._on_media_clicked)
+        self._movies_view.media_play.connect(self._on_media_play)
+
+        self._series_view = SeriesView()
+        self._series_view.media_clicked.connect(self._on_media_clicked)
+        self._series_view.media_play.connect(self._on_media_play)
+
+        self._detail_view = DetailView()
+        self._detail_view.play_requested.connect(self._on_media_play)
+        self._detail_view.back_requested.connect(self._on_detail_back)
+
+        self._player_view = PlayerView()
+        self._player_view.back_requested.connect(self._on_player_back)
+
+        self._settings_view = SettingsView()
+        self._settings_view.library_changed.connect(self._refresh_all_views)
+
+        self._stack.addWidget(self._home_view)
+        self._stack.addWidget(self._movies_view)
+        self._stack.addWidget(self._series_view)
+        self._stack.addWidget(self._detail_view)
+        self._stack.addWidget(self._player_view)
+        self._stack.addWidget(self._settings_view)
+
+        main_layout.addWidget(self._stack, stretch=1)
+
+        self._current_view = VIEW_HOME
+        self._previous_view = VIEW_HOME
+        self._view_before_detail = VIEW_HOME
+        self._navigate(VIEW_HOME)
+        self._refresh_all_views()
+
+        logger.info("MainWindow initialized")
+
+
+    def _navigate(self, view_index: int):
+        if view_index in (VIEW_PLAYER, VIEW_DETAIL):
+            return
+
+        self._previous_view = self._current_view
+        self._current_view = view_index
+        self._stack.setCurrentIndex(view_index)
+        self._update_nav_highlight(view_index)
+        self._refresh_view(view_index)
+
+    def _update_nav_highlight(self, active_index: int):
+        for btn, idx in self._nav_buttons:
+            btn.setProperty("active", idx == active_index)
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
+
+    def _refresh_view(self, view_index: int):
+        try:
+            if view_index == VIEW_HOME:
+                self._home_view.refresh(self._media_service)
+            elif view_index == VIEW_MOVIES:
+                self._movies_view.refresh(self._media_service)
+            elif view_index == VIEW_SERIES:
+                self._series_view.refresh(self._media_service)
+            elif view_index == VIEW_SETTINGS:
+                self._settings_view.refresh(self._media_service)
+        except Exception as e:
+            logger.error(f"Failed to refresh view {view_index}: {e}")
+
+    def _refresh_all_views(self):
+
+        self._refresh_view(self._current_view)
+        self._update_stats_label()
+
+    def _update_stats_label(self):
+        try:
+            stats = self._media_service.get_stats()
+            total = stats["total_media"]
+            if total == 0:
+                self._stats_label.setText(
+                    "Bibliothèque vide\nAjoutez des dossiers\ndans les paramètres"
+                )
+            else:
+                self._stats_label.setText(
+                    f"{stats['movies']} films · {stats['episodes']} épisodes\n"
+                    f"{stats['watched']} vus · {stats['in_progress']} en cours"
+                )
+        except Exception:
+            self._stats_label.setText("Bibliothèque")
+
+    def _on_media_clicked(self, media_id: int):
+        media = self._media_service.get_media_by_id(media_id)
+        if not media:
+            logger.warning(f"Media not found: {media_id}")
+            return
+
+        self._view_before_detail = self._current_view
+        self._previous_view = self._current_view
+        self._current_view = VIEW_DETAIL
+
+        self._detail_view.show_media(media, self._media_service)
+        self._stack.setCurrentIndex(VIEW_DETAIL)
+        self._update_nav_highlight(-1)
+
+    def _on_media_play(self, media_id: int):
+        media = self._media_service.get_media_by_id(media_id)
+        if not media:
+            logger.warning(f"Media not found: {media_id}")
+            return
+        if self._current_view != VIEW_PLAYER:
+            self._previous_view = self._current_view
+        self._current_view = VIEW_PLAYER
+
+        subtitle_paths = []
+        if hasattr(self._detail_view, 'get_subtitle_paths'):
+            subtitle_paths = self._detail_view.get_subtitle_paths()
+
+        self._stack.setCurrentIndex(VIEW_PLAYER)
+        self._player_view.play_media(media, self._media_service, subtitle_paths)
+
+        self._update_nav_highlight(-1)
+
+    def _on_detail_back(self):
+        target = self._view_before_detail
+        self._current_view = target
+        self._stack.setCurrentIndex(target)
+        self._update_nav_highlight(target)
+        self._refresh_view(target)
+
+    def _on_player_back(self):
+        if self._previous_view == VIEW_DETAIL:
+            self._current_view = VIEW_DETAIL
+            self._stack.setCurrentIndex(VIEW_DETAIL)
+            self._update_nav_highlight(-1)
+            if self._detail_view._media:
+                refreshed = self._media_service.get_media_by_id(self._detail_view._media.id)
+                if refreshed:
+                    self._detail_view.show_media(refreshed, self._media_service)
         else:
-            self.video_widget.player.play()
-            self.btn_play.setText("pause")
+            target = self._previous_view if self._previous_view not in (VIEW_DETAIL, VIEW_PLAYER) else VIEW_HOME
+            self._navigate(target)
 
-    def set_volume(self, value):
-        self.video_widget.player.audio_set_volume(value)
+    def _open_file(self):
+        start_dir = str(Path.home() / "Videos")
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Ouvrir un fichier média", start_dir,
+            "Médias (*.mp4 *.mkv *.avi *.mov *.wmv *.flv *.webm *.m4v *.mpg *.mpeg *.ts)"
+        )
+        if file_path:
+            self._previous_view = self._current_view
+            self._current_view = VIEW_PLAYER
+            self._stack.setCurrentIndex(VIEW_PLAYER)
+            self._player_view.play_file(file_path)
+            self._update_nav_highlight(-1)
 
-    def update_ui(self):
-            """automatic call to update the seek slider and time label"""
-            if self.is_user_seeking:
-                return
+    def closeEvent(self, event):
 
-            length = self.video_widget.player.get_length()
-            time = self.video_widget.player.get_time()
+        try:
+            if hasattr(self, '_player_view'):
+                self._player_view.stop()
+        except Exception as e:
+            logger.error(f"Error stopping player logic: {e}")
 
-            if length > 0:
-                self.seek_slider.setMaximum(length)
-                self.seek_slider.setValue(time)
+        try:
+            if hasattr(self, '_player_view') and hasattr(self._player_view, 'video_widget'):
+                widget = self._player_view.video_widget
 
-                s_time = self.format_time(time)
-                s_length = self.format_time(length)
-                self.time_label.setText(f"{s_time} / {s_length}")
+                if hasattr(widget, 'player') and widget.player:
+                    widget.player.release()
+                    widget.player = None
 
-    def on_slider_pressed(self):
-        self.is_user_seeking = True
+                if hasattr(widget, 'instance') and widget.instance:
+                    widget.instance.release()
+                    widget.instance = None
+                    
+        except Exception as e:
+            logger.error(f"Error releasing VLC resources: {e}")
 
-    def on_slider_moved(self, value):
-        """slide move event: update time label only"""
-        target_time = value
-        s_time = self.format_time(target_time)
-        length = self.video_widget.player.get_length()
-        s_length = self.format_time(length)
-        self.time_label.setText(f"{s_time} / {s_length}")
+        try:
+            if hasattr(self, '_media_service'):
+                self._media_service.close()
+        except Exception:
+            pass
 
-    def on_slider_released(self):
-        """User releases the slider: jump to the chosen time."""
-        target_time = self.seek_slider.value()
-        self.video_widget.player.set_time(target_time)
-        self.is_user_seeking = False
-    
-    def format_time(self, ms):
-        if ms < 0:
-            return "00:00:00"
-        seconds = (ms // 1000) % 60
-        minutes = (ms // 60000) % 60
-        hours = (ms // 3600000)
-        return f"{hours:02}:{minutes:02}:{seconds:02}"
+        logger.info("EpiKodi closed")
+        super().closeEvent(event)
