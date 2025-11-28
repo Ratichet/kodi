@@ -35,3 +35,13 @@ EpiKodi est une application media center inspirée de Kodi, visant à indexer de
 - Réalisateur : Quentin Lecourt (chef de projet & dev unique)
 - Encadrant : Joffrey Riela
 - Utilisateurs cibles : utilisateurs desktop gérant une médiathèque locale
+
+
+## Installation
+
+1. **VLC Media Player** doit être installé sur le système (version 64-bits recommandée).
+2. Créer l'environnement :
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # ou .venv\Scripts\activate sur Windows
+   pip install -r requirements.txt
