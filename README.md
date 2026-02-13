@@ -44,7 +44,6 @@ L'interface est organisée en vues spécialisées gérées par un contrôleur ce
 Le lecteur intégré utilise VLC pour la lecture. Il propose des fonctionnalités avancées :
 
 * **Gestion de la progression :** Sauvegarde automatique de la position pour reprendre la lecture plus tard.
-* **Contrôles intelligents :** Masquage automatique du curseur et de l'interface après quelques secondes d'inactivité en plein écran.
 * **Support multi-pistes :** Sélection des pistes audio et chargement automatique des sous-titres locaux (`.srt`, `.ass`).
 
 ## 3. Installation et Configuration
