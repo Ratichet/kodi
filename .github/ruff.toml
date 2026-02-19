@@ -1,0 +1,23 @@
+target-version = "py311"
+line-length = 110
+
+[lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes (variables non utilisées, imports manquants…)
+    "W",   # pycodestyle warnings
+    "I",   # isort (ordre des imports)
+    "UP",  # pyupgrade (syntaxe Python moderne)
+]
+ignore = [
+    "E501",  # line too long – géré par le formateur
+    "F401",  # unused import – trop de faux positifs avec PySide6 re-exports
+    "E741",  # ambiguous variable name (l, O, I) – courant dans les layouts Qt
+]
+
+[lint.per-file-ignores]
+"test.py" = ["F841"]
+
+[format]
+quote-style = "double"
+indent-style = "space"

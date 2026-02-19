@@ -1,0 +1,139 @@
+name: CD – Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install mutagen pyinstaller
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller `
+            --name EpiKodi `
+            --onefile `
+            --windowed `
+            --icon assets/icon.ico `
+            --add-data "ui/styles.py;ui" `
+            --hidden-import vlc `
+            --hidden-import PySide6.QtSvg `
+            main.py
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EpiKodi-windows
+          path: dist/EpiKodi.exe
+
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            vlc libvlc-dev libgl1 libegl1
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install mutagen pyinstaller
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller \
+            --name EpiKodi \
+            --onefile \
+            --hidden-import vlc \
+            --hidden-import PySide6.QtSvg \
+            main.py
+
+      - name: Make executable
+        run: chmod +x dist/EpiKodi
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EpiKodi-linux
+          path: dist/EpiKodi
+
+  release:
+    name: GitHub Release
+    runs-on: ubuntu-latest
+    needs: [ build-windows, build-linux ]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: EpiKodi-windows
+          path: release/
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: EpiKodi-linux
+          path: release/
+
+      - name: Rename artifacts with version
+        run: |
+          TAG=${GITHUB_REF_NAME}
+          mv release/EpiKodi.exe  release/EpiKodi-${TAG}-windows.exe
+          mv release/EpiKodi      release/EpiKodi-${TAG}-linux
+
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          TAG=${GITHUB_REF_NAME}
+          if [ -f CHANGELOG.md ]; then
+            NOTES=$(awk "/^## \[?${TAG}\]?/{found=1; next} found && /^## /{exit} found{print}" CHANGELOG.md)
+          else
+            NOTES="Release ${TAG}"
+          fi
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: EpiKodi ${{ github.ref_name }}
+          body: ${{ steps.changelog.outputs.notes }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
+          files: |
+            release/EpiKodi-*-windows.exe
+            release/EpiKodi-*-linux
