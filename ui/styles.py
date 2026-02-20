@@ -1,4 +1,3 @@
-
 COLORS = {
     "bg_dark": "#121212",
     "bg_sidebar": "#1a1a2e",
@@ -346,3 +345,15 @@ QLabel#empty_state {{
 def get_dark_theme() -> str:
     """Returns the dark theme QSS."""
     return DARK_THEME
+
+
+ACCENT      = COLORS["accent"]
+BG_DARK     = COLORS["bg_input"]
+BG_MID      = COLORS["bg_content"]
+BG_PANEL    = COLORS["bg_sidebar"]
+BG_ROW      = COLORS["bg_card"]
+BG_ROW_ALT  = "#19253f"
+BG_ROW_SEL  = COLORS["bg_card_hover"]
+TEXT_PRIMARY   = COLORS["text_primary"]
+TEXT_SECONDARY = COLORS["text_secondary"]
+TEXT_MUTED     = COLORS["text_muted"]
