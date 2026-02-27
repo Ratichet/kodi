@@ -6,7 +6,7 @@ on:
       - "v*"
 
 permissions:
-  contents: write   # nécessaire pour créer la Release
+  contents: write
 
 jobs:
   build-windows:
@@ -21,6 +21,9 @@ jobs:
           python-version: "3.11"
           cache: pip
 
+      - name: Install VLC
+        run: choco install vlc --no-progress -y
+
       - name: Install dependencies
         run: |
           pip install --upgrade pip
@@ -30,13 +33,19 @@ jobs:
       - name: Build with PyInstaller
         shell: pwsh
         run: |
+          $vlc = "C:\Program Files\VideoLAN\VLC"
           pyinstaller --name EpiKodi --onefile --windowed `
             --icon assets/icon.ico `
-            --add-data "ui/styles.py;ui" `
+            --add-data "$vlc;vlc_libs" `
             --collect-data babelfish `
             --collect-data guessit `
             --hidden-import vlc `
             --hidden-import PySide6.QtSvg `
+            --hidden-import babelfish.converters.alpha2 `
+            --hidden-import babelfish.converters.alpha3b `
+            --hidden-import babelfish.converters.alpha3t `
+            --hidden-import babelfish.converters.name `
+            --hidden-import babelfish.converters.opensubtitles `
             main.py
 
       - name: Upload Windows artifact
@@ -78,6 +87,11 @@ jobs:
             --collect-data guessit \
             --hidden-import vlc \
             --hidden-import PySide6.QtSvg \
+            --hidden-import babelfish.converters.alpha2 \
+            --hidden-import babelfish.converters.alpha3b \
+            --hidden-import babelfish.converters.alpha3t \
+            --hidden-import babelfish.converters.name \
+            --hidden-import babelfish.converters.opensubtitles \
             main.py
 
       - name: Make executable
@@ -112,13 +126,12 @@ jobs:
       - name: Rename artifacts with version
         run: |
           TAG=${GITHUB_REF_NAME}
-          mv release/EpiKodi.exe  release/EpiKodi-${TAG}-windows.exe
-          mv release/EpiKodi      release/EpiKodi-${TAG}-linux
+          mv release/EpiKodi.exe release/EpiKodi-${TAG}-windows.exe
+          mv release/EpiKodi     release/EpiKodi-${TAG}-linux
 
       - name: Extract changelog for this version
         id: changelog
         run: |
-          # Extrait la section du CHANGELOG.md correspondant au tag courant
           TAG=${GITHUB_REF_NAME}
           if [ -f CHANGELOG.md ]; then
             NOTES=$(awk "/^## \[?${TAG}\]?/{found=1; next} found && /^## /{exit} found{print}" CHANGELOG.md)

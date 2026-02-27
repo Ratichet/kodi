@@ -1,3 +1,4 @@
+import os
 import sys
 import logging
 from PySide6.QtWidgets import QApplication
@@ -9,6 +10,23 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+
+def _patch_vlc_path():
+    if not getattr(sys, "frozen", False):
+        return 
+
+    bundle_dir = sys._MEIPASS
+    vlc_dir = os.path.join(bundle_dir, "vlc_libs")
+
+    if not os.path.isdir(vlc_dir):
+        return
+
+    libvlc = os.path.join(vlc_dir, "libvlc.dll")
+    if os.path.isfile(libvlc):
+        os.environ["PYTHON_VLC_LIB_PATH"] = libvlc
+    os.environ["PATH"] = vlc_dir + os.pathsep + os.environ.get("PATH", "")
+
 
 
 def main():
