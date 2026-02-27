@@ -1,16 +1,5 @@
 import os
 import sys
-import logging
-from PySide6.QtWidgets import QApplication
-
-from core.database import init_db
-from ui.main_window import MainWindow
-
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
-
 
 def _patch_vlc_path():
     if not getattr(sys, "frozen", False):
@@ -27,7 +16,18 @@ def _patch_vlc_path():
         os.environ["PYTHON_VLC_LIB_PATH"] = libvlc
     os.environ["PATH"] = vlc_dir + os.pathsep + os.environ.get("PATH", "")
 
+_patch_vlc_path()
 
+import logging
+from PySide6.QtWidgets import QApplication
+
+from core.database import init_db
+from ui.main_window import MainWindow
+
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 def main():
     logger.info("Lancement de EpiKodi")
