@@ -4,10 +4,9 @@ on:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: write   # nécessaire pour créer la Release
 
 jobs:
   build-windows:
@@ -29,13 +28,13 @@ jobs:
           pip install mutagen pyinstaller
 
       - name: Build with PyInstaller
+        shell: pwsh
         run: |
-          pyinstaller `
-            --name EpiKodi `
-            --onefile `
-            --windowed `
+          pyinstaller --name EpiKodi --onefile --windowed `
             --icon assets/icon.ico `
             --add-data "ui/styles.py;ui" `
+            --collect-data babelfish `
+            --collect-data guessit `
             --hidden-import vlc `
             --hidden-import PySide6.QtSvg `
             main.py
@@ -75,6 +74,8 @@ jobs:
           pyinstaller \
             --name EpiKodi \
             --onefile \
+            --collect-data babelfish \
+            --collect-data guessit \
             --hidden-import vlc \
             --hidden-import PySide6.QtSvg \
             main.py
@@ -117,6 +118,7 @@ jobs:
       - name: Extract changelog for this version
         id: changelog
         run: |
+          # Extrait la section du CHANGELOG.md correspondant au tag courant
           TAG=${GITHUB_REF_NAME}
           if [ -f CHANGELOG.md ]; then
             NOTES=$(awk "/^## \[?${TAG}\]?/{found=1; next} found && /^## /{exit} found{print}" CHANGELOG.md)
