@@ -1,10 +1,15 @@
 import logging
 from pathlib import Path
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QFrame, QGridLayout, QSizePolicy
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QFrame,
 )
-from PySide6.QtCore import Qt, Signal, QSize
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap, QPainter, QColor, QLinearGradient, QBrush, QFont
 
 logger = logging.getLogger(__name__)
@@ -14,6 +19,7 @@ def _resolve_poster(media) -> str | None:
     if not media.poster_path:
         return None
     from core.config import BASE_DIR
+
     p = BASE_DIR / "cache" / "posters" / f"w500{media.poster_path.replace('/', '_')}"
     return str(p) if p.exists() else None
 
@@ -22,7 +28,13 @@ def _resolve_backdrop(media) -> str | None:
     if not media.backdrop_path:
         return None
     from core.config import BASE_DIR
-    p = BASE_DIR / "cache" / "backdrops" / f"w1280{media.backdrop_path.replace('/', '_')}"
+
+    p = (
+        BASE_DIR
+        / "cache"
+        / "backdrops"
+        / f"w1280{media.backdrop_path.replace('/', '_')}"
+    )
     return str(p) if p.exists() else None
 
 
@@ -46,7 +58,6 @@ def _format_resume(ms: int) -> str:
 
 
 class BackdropHeader(QWidget):
-
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(340)
@@ -58,8 +69,16 @@ class BackdropHeader(QWidget):
         self._rating = ""
         self._duration = ""
 
-    def set_data(self, title: str, year: str, genres: str, rating: str,
-                 duration: str, backdrop_path: str = None, poster_path: str = None):
+    def set_data(
+        self,
+        title: str,
+        year: str,
+        genres: str,
+        rating: str,
+        duration: str,
+        backdrop_path: str = None,
+        poster_path: str = None,
+    ):
         self._title = title
         self._year = year
         self._genres = genres
@@ -140,7 +159,6 @@ class BackdropHeader(QWidget):
 
 
 class EpisodeRow(QFrame):
-
     play_clicked = Signal(int)
 
     def __init__(self, media, parent=None):
@@ -167,7 +185,9 @@ class EpisodeRow(QFrame):
         if media.season_number and media.episode_number:
             ep_num = f"S{media.season_number:02d}E{media.episode_number:02d}"
         num_label = QLabel(ep_num)
-        num_label.setStyleSheet("color: #e94560; font-weight: 700; font-size: 13px; min-width: 65px;")
+        num_label.setStyleSheet(
+            "color: #e94560; font-weight: 700; font-size: 13px; min-width: 65px;"
+        )
         layout.addWidget(num_label)
 
         # title + overview
@@ -180,7 +200,11 @@ class EpisodeRow(QFrame):
         info_layout.addWidget(title_label)
 
         if media.overview:
-            overview = media.overview[:120] + "…" if len(media.overview) > 120 else media.overview
+            overview = (
+                media.overview[:120] + "…"
+                if len(media.overview) > 120
+                else media.overview
+            )
             ov_label = QLabel(overview)
             ov_label.setStyleSheet("color: #8892a0; font-size: 11px;")
             ov_label.setWordWrap(True)
@@ -227,7 +251,6 @@ class EpisodeRow(QFrame):
 
 
 class DetailView(QScrollArea):
-
     play_requested = Signal(int)
     back_requested = Signal()
 
@@ -293,7 +316,9 @@ class DetailView(QScrollArea):
 
         self._synopsis_label = QLabel("")
         self._synopsis_label.setWordWrap(True)
-        self._synopsis_label.setStyleSheet("color: #c0c8d4; font-size: 14px; line-height: 1.5;")
+        self._synopsis_label.setStyleSheet(
+            "color: #c0c8d4; font-size: 14px; line-height: 1.5;"
+        )
         body_layout.addWidget(self._synopsis_label)
 
         self._subs_header = QLabel("Sous-titres détectés")
@@ -342,7 +367,7 @@ class DetailView(QScrollArea):
         )
 
         if media.resume_position and media.resume_position > 0 and not media.is_watched:
-            self._btn_play.setText(f"▶  Reprendre")
+            self._btn_play.setText("▶  Reprendre")
         else:
             self._btn_play.setText("▶  Lire")
 
@@ -408,7 +433,9 @@ class DetailView(QScrollArea):
         if found:
             self._subs_header.setVisible(True)
             self._subs_label.setVisible(True)
-            self._subs_label.setText("\n".join(f"  📄  {f}" for f in sorted(set(found))))
+            self._subs_label.setText(
+                "\n".join(f"  📄  {f}" for f in sorted(set(found)))
+            )
         else:
             self._subs_header.setVisible(False)
             self._subs_label.setVisible(False)
@@ -420,16 +447,20 @@ class DetailView(QScrollArea):
             if w:
                 w.deleteLater()
 
-        if media.media_type != "episode" or not media.series_name or not self._media_service:
+        if (
+            media.media_type != "episode"
+            or not media.series_name
+            or not self._media_service
+        ):
             self._episodes_header.setVisible(False)
             self._episodes_container.setVisible(False)
             return
 
         all_eps = self._media_service.search_media(media.series_name, limit=200)
         episodes = [
-            e for e in all_eps
-            if e.media_type == "episode"
-            and e.series_name == media.series_name
+            e
+            for e in all_eps
+            if e.media_type == "episode" and e.series_name == media.series_name
         ]
         episodes.sort(key=lambda e: (e.season_number or 0, e.episode_number or 0))
 
@@ -439,6 +470,7 @@ class DetailView(QScrollArea):
             return
 
         from collections import defaultdict
+
         seasons = defaultdict(list)
         for ep in episodes:
             seasons[ep.season_number or 0].append(ep)
@@ -449,8 +481,12 @@ class DetailView(QScrollArea):
         for season_num in sorted(seasons.keys()):
             eps = seasons[season_num]
 
-            season_label = QLabel(f"Saison {season_num}" if season_num > 0 else "Saison inconnue")
-            season_label.setStyleSheet("color: #eaeaea; font-size: 15px; font-weight: 600; padding-top: 8px;")
+            season_label = QLabel(
+                f"Saison {season_num}" if season_num > 0 else "Saison inconnue"
+            )
+            season_label.setStyleSheet(
+                "color: #eaeaea; font-size: 15px; font-weight: 600; padding-top: 8px;"
+            )
             self._episodes_layout.addWidget(season_label)
 
             for ep in eps:
@@ -472,6 +508,7 @@ class DetailView(QScrollArea):
             return []
 
         from core.config import SUPPORTED_SUBTITLE_EXTENSIONS
+
         media_path = Path(self._media.file_path)
         parent = media_path.parent
         stem = media_path.stem

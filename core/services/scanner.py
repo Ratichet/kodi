@@ -19,15 +19,13 @@ from core.models import Media
 
 logger = logging.getLogger(__name__)
 
-# Config scanner
-MIN_VIDEO_SIZE_MB = 50  # skip tiny video files (samples, etc.)
-MIN_AUDIO_SIZE_KB = 100  # skip audio files < 100 KB (jingles / corrupt)
+MIN_VIDEO_SIZE_MB = 50
+MIN_AUDIO_SIZE_KB = 100
 IGNORED_KEYWORDS = ["sample", "trailer", "featurette", "extra", "scene"]
 
 
 @dataclass
 class ParsedMedia:
-    """Parsed media info extracted from filename (and optionally audio tags)."""
 
     file_path: str
     title: str
@@ -51,10 +49,6 @@ class ParsedMedia:
         if self.media_type == "episode" and self.series:
             return self.series
         return self.title
-
-
-# ── Audio tag reader (uses mutagen when available) ────────────────────────────
-
 
 def _read_audio_tags(file_path: str) -> Dict[str, Any]:
     try:
@@ -88,10 +82,6 @@ def _read_audio_tags(file_path: str) -> Dict[str, Any]:
     except Exception as e:
         logger.debug(f"Could not read audio tags for {file_path}: {e}")
         return {}
-
-
-# ── Parsers ───────────────────────────────────────────────────────────────────
-
 
 class MediaParser:
     @staticmethod
@@ -153,11 +143,6 @@ class MediaParser:
             album=tags.get("album"),
             track_number=tags.get("track_number"),
         )
-
-
-# ── Scanner ───────────────────────────────────────────────────────────────────
-
-
 class MediaScanner:
     """Scan directories and find valid media files."""
 

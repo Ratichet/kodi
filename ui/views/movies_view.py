@@ -1,7 +1,12 @@
 import logging
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QComboBox, QPushButton, QFrame
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QComboBox,
+    QFrame,
 )
 from PySide6.QtCore import Qt, Signal, QTimer
 
@@ -11,37 +16,36 @@ logger = logging.getLogger(__name__)
 
 
 class MoviesView(QWidget):
-    
     media_clicked = Signal(int)
     media_play = Signal(int)
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("content_area")
         self._media_service = None
         self._all_movies = []
-        
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 16, 20, 0)
         layout.setSpacing(12)
 
         header_layout = QHBoxLayout()
-        
+
         title = QLabel("Films")
         title.setObjectName("page_title")
         header_layout.addWidget(title)
-        
+
         header_layout.addStretch()
-        
+
         self._count_label = QLabel("0 films")
         self._count_label.setObjectName("subtitle")
         header_layout.addWidget(self._count_label)
-        
+
         layout.addLayout(header_layout)
 
         filter_layout = QHBoxLayout()
         filter_layout.setSpacing(10)
-        
+
         self._search = QLineEdit()
         self._search.setObjectName("search_bar")
         self._search.setPlaceholderText("Rechercher un film...")
@@ -49,7 +53,7 @@ class MoviesView(QWidget):
         self._search.setMaximumWidth(400)
         self._search.setClearButtonEnabled(True)
         filter_layout.addWidget(self._search)
-        
+
         filter_layout.addStretch()
 
         self._genre_filter = QComboBox()
@@ -76,7 +80,9 @@ class MoviesView(QWidget):
         self._grid.card_clicked.connect(self.media_clicked.emit)
         self._grid.card_play.connect(self.media_play.emit)
         layout.addWidget(self._grid, stretch=1)
-        self._empty_label = QLabel("Aucun film trouvé.\nAjoutez un dossier dans les paramètres pour scanner vos médias.")
+        self._empty_label = QLabel(
+            "Aucun film trouvé.\nAjoutez un dossier dans les paramètres pour scanner vos médias."
+        )
         self._empty_label.setObjectName("empty_state")
         self._empty_label.setAlignment(Qt.AlignCenter)
         self._empty_label.setVisible(False)
@@ -86,12 +92,12 @@ class MoviesView(QWidget):
         self._search_timer.setSingleShot(True)
         self._search_timer.setInterval(300)
         self._search_timer.timeout.connect(self._apply_filters)
-        
+
         self._search.textChanged.connect(lambda: self._search_timer.start())
         self._genre_filter.currentIndexChanged.connect(self._apply_filters)
         self._year_filter.currentIndexChanged.connect(self._apply_filters)
         self._watched_filter.currentIndexChanged.connect(self._apply_filters)
-    
+
     def refresh(self, media_service):
         self._media_service = media_service
         try:
@@ -101,7 +107,7 @@ class MoviesView(QWidget):
             logger.info(f"Movies view refreshed: {len(self._all_movies)} movies")
         except Exception as e:
             logger.error(f"Failed to refresh movies view: {e}")
-    
+
     def _populate_filter_options(self):
         genres = set()
         years = set()
@@ -135,7 +141,7 @@ class MoviesView(QWidget):
             if idx >= 0:
                 self._year_filter.setCurrentIndex(idx)
         self._year_filter.blockSignals(False)
-    
+
     def _apply_filters(self):
         search_text = self._search.text().strip().lower()
         genre = self._genre_filter.currentData()
@@ -157,10 +163,12 @@ class MoviesView(QWidget):
                 continue
             if watched == "unwatched" and movie.is_watched:
                 continue
-            
+
             filtered.append(movie)
         self._grid.set_media_list(filtered)
-        self._count_label.setText(f"{len(filtered)} film{'s' if len(filtered) != 1 else ''}")
+        self._count_label.setText(
+            f"{len(filtered)} film{'s' if len(filtered) != 1 else ''}"
+        )
         has_items = len(filtered) > 0
         self._grid.setVisible(has_items)
         self._empty_label.setVisible(not has_items)

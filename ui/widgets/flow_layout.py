@@ -1,8 +1,8 @@
-from PySide6.QtWidgets import QLayout, QSizePolicy
+from PySide6.QtWidgets import QLayout
 from PySide6.QtCore import Qt, QRect, QSize, QPoint
 
-class FlowLayout(QLayout):
 
+class FlowLayout(QLayout):
     def __init__(self, parent=None, margin=0, h_spacing=12, v_spacing=12):
         super().__init__(parent)
         self._h_spacing = h_spacing
@@ -54,14 +54,18 @@ class FlowLayout(QLayout):
         size = QSize()
         for item in self._items:
             size = size.expandedTo(item.minimumSize())
-        
+
         margins = self.contentsMargins()
-        size += QSize(margins.left() + margins.right(), margins.top() + margins.bottom())
+        size += QSize(
+            margins.left() + margins.right(), margins.top() + margins.bottom()
+        )
         return size
 
     def _do_layout(self, rect, test_only=False):
         margins = self.contentsMargins()
-        effective_rect = rect.adjusted(margins.left(), margins.top(), -margins.right(), -margins.bottom())
+        effective_rect = rect.adjusted(
+            margins.left(), margins.top(), -margins.right(), -margins.bottom()
+        )
 
         x = effective_rect.x()
         y = effective_rect.y()

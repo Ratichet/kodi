@@ -347,13 +347,13 @@ def get_dark_theme() -> str:
     return DARK_THEME
 
 
-ACCENT      = COLORS["accent"]
-BG_DARK     = COLORS["bg_input"]
-BG_MID      = COLORS["bg_content"]
-BG_PANEL    = COLORS["bg_sidebar"]
-BG_ROW      = COLORS["bg_card"]
-BG_ROW_ALT  = "#19253f"
-BG_ROW_SEL  = COLORS["bg_card_hover"]
-TEXT_PRIMARY   = COLORS["text_primary"]
+ACCENT = COLORS["accent"]
+BG_DARK = COLORS["bg_input"]
+BG_MID = COLORS["bg_content"]
+BG_PANEL = COLORS["bg_sidebar"]
+BG_ROW = COLORS["bg_card"]
+BG_ROW_ALT = "#19253f"
+BG_ROW_SEL = COLORS["bg_card_hover"]
+TEXT_PRIMARY = COLORS["text_primary"]
 TEXT_SECONDARY = COLORS["text_secondary"]
-TEXT_MUTED     = COLORS["text_muted"]
+TEXT_MUTED = COLORS["text_muted"]

@@ -6,15 +6,13 @@ from core.database import init_db
 from ui.main_window import MainWindow
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
 
 def main():
     logger.info("Lancement de EpiKodi")
-    
 
     logger.info("Initialisation de la base de données...")
     init_db()

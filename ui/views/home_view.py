@@ -8,17 +8,16 @@ logger = logging.getLogger(__name__)
 
 
 class HomeView(QScrollArea):
-    
     media_clicked = Signal(int)
     media_play = Signal(int)
     navigate_to = Signal(str)
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWidgetResizable(True)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setFrameShape(QFrame.NoFrame)
-        
+
         self._container = QWidget()
         self._container.setObjectName("content_area")
         self._main_layout = QVBoxLayout(self._container)
@@ -33,25 +32,25 @@ class HomeView(QScrollArea):
         self._continue_row.card_clicked.connect(self.media_clicked.emit)
         self._continue_row.card_play.connect(self.media_play.emit)
         self._main_layout.addWidget(self._continue_row)
-        
+
         self._recent_row = HorizontalMediaRow("🕐  Récemment ajoutés")
         self._recent_row.card_clicked.connect(self.media_clicked.emit)
         self._recent_row.card_play.connect(self.media_play.emit)
         self._main_layout.addWidget(self._recent_row)
-        
+
         self._movies_row = HorizontalMediaRow("🎬  Films")
         self._movies_row.card_clicked.connect(self.media_clicked.emit)
         self._movies_row.card_play.connect(self.media_play.emit)
         self._main_layout.addWidget(self._movies_row)
-        
+
         self._series_row = HorizontalMediaRow("📺  Séries")
         self._series_row.card_clicked.connect(self.media_clicked.emit)
         self._series_row.card_play.connect(self.media_play.emit)
         self._main_layout.addWidget(self._series_row)
-        
+
         self._main_layout.addStretch()
         self.setWidget(self._container)
-    
+
     def refresh(self, media_service):
         try:
             in_progress = media_service.get_in_progress(limit=15)
@@ -64,7 +63,7 @@ class HomeView(QScrollArea):
             episodes = media_service.get_episodes(limit=15)
             self._series_row.set_media_list(episodes)
             self._series_row.setVisible(len(episodes) > 0)
-            
+
             logger.info(
                 f"Home refreshed: {len(in_progress)} in progress, "
                 f"{len(recent)} recent, {len(movies)} movies, "

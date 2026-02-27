@@ -1,17 +1,17 @@
-"""
-Player View - Media playback with VLC backend.
-Wraps the VideoWidget and adds seek, volume, subtitle support, audio tracks, and fullscreen.
-Includes auto-hide cursor and controls logic using ROBUST CURSOR POLLING.
-"""
-
 import logging
 from pathlib import Path
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QSlider, QFrame, QFileDialog, QMenu, QApplication
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QLabel,
+    QSlider,
+    QFileDialog,
+    QMenu,
 )
 from PySide6.QtCore import Qt, QTimer, Signal, QPoint
-from PySide6.QtGui import QCursor, QAction
+from PySide6.QtGui import QCursor
 
 from ui.widgets.video_widget import VideoWidget
 
@@ -22,6 +22,7 @@ class PlayerView(QWidget):
     """Full-screen media player view with subtitle and audio support."""
 
     back_requested = Signal()
+    media_ended = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -39,7 +40,7 @@ class PlayerView(QWidget):
         # --- Video Widget ---
         self.video_widget = VideoWidget()
         # Double clic pour basculer plein écran
-        self.video_widget.mouseDoubleClickEvent = self._on_double_click 
+        self.video_widget.mouseDoubleClickEvent = self._on_double_click
         layout.addWidget(self.video_widget, stretch=1)
 
         # --- Controls ---
@@ -90,14 +91,18 @@ class PlayerView(QWidget):
 
         # Time
         self._time_label = QLabel("00:00:00 / 00:00:00")
-        self._time_label.setStyleSheet("color: #8892a0; font-family: monospace; font-size: 12px;")
+        self._time_label.setStyleSheet(
+            "color: #8892a0; font-family: monospace; font-size: 12px;"
+        )
         btn_layout.addWidget(self._time_label)
 
         btn_layout.addStretch()
 
         # Title
         self._title_label = QLabel("")
-        self._title_label.setStyleSheet("color: #eaeaea; font-size: 13px; font-weight: 600;")
+        self._title_label.setStyleSheet(
+            "color: #eaeaea; font-size: 13px; font-weight: 600;"
+        )
         btn_layout.addWidget(self._title_label)
 
         btn_layout.addStretch()
@@ -127,7 +132,7 @@ class PlayerView(QWidget):
         btn_layout.addWidget(self._vol_slider)
 
         # --- Fullscreen Button ---
-        self._btn_fs = QPushButton("⇱") # Symbole plein écran
+        self._btn_fs = QPushButton("⇱")  # Symbole plein écran
         self._btn_fs.setObjectName("icon_button")
         self._btn_fs.setToolTip("Plein écran (Double-clic ou F)")
         self._btn_fs.setFixedWidth(36)
@@ -145,21 +150,21 @@ class PlayerView(QWidget):
         self._save_timer = QTimer(self)
         self._save_timer.setInterval(10000)
         self._save_timer.timeout.connect(self._save_progress)
-        
+
         # --- Timers pour UI Fullscreen ---
         # 1. Timer qui cache l'UI après 4 secondes d'inactivité
         self._inactivity_timer = QTimer(self)
-        self._inactivity_timer.setInterval(4000) 
+        self._inactivity_timer.setInterval(4000)
         self._inactivity_timer.setSingleShot(True)
         self._inactivity_timer.timeout.connect(self._hide_ui)
 
         # 2. Timer qui surveille la position de la souris (POLLING)
         # C'est la seule méthode fiable avec VLC
         self._mouse_check_timer = QTimer(self)
-        self._mouse_check_timer.setInterval(200) # Vérifie 5 fois par seconde
+        self._mouse_check_timer.setInterval(200)  # Vérifie 5 fois par seconde
         self._mouse_check_timer.timeout.connect(self._check_mouse_activity)
         self._last_mouse_pos = QPoint(0, 0)
-        
+
         self.setFocusPolicy(Qt.StrongFocus)
         self.setMouseTracking(True)
 
@@ -181,7 +186,11 @@ class PlayerView(QWidget):
             self._title_label.setText("⚠ Fichier introuvable")
             return
 
-        display = media.display_title if hasattr(media, 'display_title') else (media.title or "Unknown")
+        display = (
+            media.display_title
+            if hasattr(media, "display_title")
+            else (media.title or "Unknown")
+        )
         self._title_label.setText(display)
 
         vlc_media = self.video_widget.instance.media_new(media.file_path)
@@ -202,9 +211,9 @@ class PlayerView(QWidget):
         self._timer.start()
         self._save_timer.start()
         self._update_subs_button()
-        
+
         self.setFocus()
-        self._show_ui() 
+        self._show_ui()
 
     def play_file(self, file_path: str):
         """Play a file directly."""
@@ -234,7 +243,7 @@ class PlayerView(QWidget):
         self._save_timer.stop()
         self._inactivity_timer.stop()
         self._mouse_check_timer.stop()
-        
+
         # 2. Sauvegarde de la progression
         try:
             self._save_progress()
@@ -251,13 +260,11 @@ class PlayerView(QWidget):
         # 4. Maintenant on peut modifier l'UI (quitter plein écran, etc.)
         if self.window().isFullScreen():
             self._toggle_fullscreen()
-            
+
         self.setCursor(Qt.ArrowCursor)
         self._btn_play.setText("▶  Lecture")
         self._current_media_id = None
         self._current_file_path = None
-
-
 
     def _resume_at(self, position_ms: int):
         if self.video_widget.player.is_playing():
@@ -268,7 +275,7 @@ class PlayerView(QWidget):
             if self.video_widget.player.is_playing():
                 self.video_widget.player.pause()
                 self._btn_play.setText("▶  Lecture")
-                self._show_ui() # En pause, on force l'affichage
+                self._show_ui()  # En pause, on force l'affichage
             else:
                 self.video_widget.player.play()
                 self._btn_play.setText("⏸  Pause")
@@ -295,28 +302,29 @@ class PlayerView(QWidget):
         except Exception as e:
             logger.error(f"Seek error: {e}")
 
-    
     def _toggle_fullscreen(self):
         main_win = self.window()
         sidebar = main_win.findChild(QWidget, "sidebar")
-        
+
         if main_win.isFullScreen():
             main_win.showNormal()
-            self._btn_fs.setText("⇱") 
-            
+            self._btn_fs.setText("⇱")
+
             self._controls.setVisible(True)
-            if sidebar: sidebar.setVisible(True)
+            if sidebar:
+                sidebar.setVisible(True)
             self.setCursor(Qt.ArrowCursor)
-            
+
             self._inactivity_timer.stop()
             self._mouse_check_timer.stop()
         else:
             main_win.showFullScreen()
-            self._btn_fs.setText("⇲") 
-            if sidebar: sidebar.setVisible(False)
-            
+            self._btn_fs.setText("⇲")
+            if sidebar:
+                sidebar.setVisible(False)
+
             self._last_mouse_pos = QCursor.pos()
-            self._show_ui() 
+            self._show_ui()
             self._mouse_check_timer.start()
 
     def _check_mouse_activity(self):
@@ -334,7 +342,7 @@ class PlayerView(QWidget):
         self.setCursor(Qt.ArrowCursor)
         self._controls.setVisible(True)
         if self.window().isFullScreen():
-            self._inactivity_timer.start(4000) 
+            self._inactivity_timer.start(4000)
         else:
             self._inactivity_timer.stop()
 
@@ -364,14 +372,16 @@ class PlayerView(QWidget):
         else:
             for track_id, name in tracks:
                 if isinstance(name, bytes):
-                    name = name.decode('utf-8', errors='ignore')
-                
+                    name = name.decode("utf-8", errors="ignore")
+
                 label = name
                 if track_id == current_track_id:
                     label = f"✓ {name}"
-                
+
                 action = menu.addAction(label)
-                action.triggered.connect(lambda checked=False, tid=track_id: self._set_audio_track(tid))
+                action.triggered.connect(
+                    lambda checked=False, tid=track_id: self._set_audio_track(tid)
+                )
 
         menu.exec(self._btn_audio.mapToGlobal(self._btn_audio.rect().topLeft()))
 
@@ -387,6 +397,7 @@ class PlayerView(QWidget):
             return []
 
         from core.config import SUPPORTED_SUBTITLE_EXTENSIONS
+
         media_path = Path(file_path)
         parent = media_path.parent
         stem = media_path.stem
@@ -426,7 +437,9 @@ class PlayerView(QWidget):
             for sub_path in self._subtitle_paths:
                 name = Path(sub_path).name
                 action = menu.addAction(f"📄 {name}")
-                action.triggered.connect(lambda checked=False, p=sub_path: self._load_subtitle(p))
+                action.triggered.connect(
+                    lambda checked=False, p=sub_path: self._load_subtitle(p)
+                )
 
         menu.addSeparator()
         action_browse = menu.addAction("📂 Charger un fichier...")
@@ -440,10 +453,12 @@ class PlayerView(QWidget):
                 if spu_desc:
                     for track_id, track_name in spu_desc:
                         if isinstance(track_name, bytes):
-                            track_name = track_name.decode('utf-8', errors='ignore')
+                            track_name = track_name.decode("utf-8", errors="ignore")
                         action = menu.addAction(f"🔤 {track_name}")
                         action.triggered.connect(
-                            lambda checked=False, tid=track_id: self.video_widget.player.video_set_spu(tid)
+                            lambda checked=False, tid=track_id: (
+                                self.video_widget.player.video_set_spu(tid)
+                            )
                         )
         except Exception:
             pass
@@ -477,8 +492,10 @@ class PlayerView(QWidget):
             start_dir = str(Path(self._current_file_path).parent)
 
         sub_path, _ = QFileDialog.getOpenFileName(
-            self, "Charger un fichier de sous-titres", start_dir,
-            "Sous-titres (*.srt *.sub *.ass *.ssa *.vtt);;Tous (*)"
+            self,
+            "Charger un fichier de sous-titres",
+            start_dir,
+            "Sous-titres (*.srt *.sub *.ass *.ssa *.vtt);;Tous (*)",
         )
         if sub_path:
             self._load_subtitle(sub_path)
@@ -532,7 +549,7 @@ class PlayerView(QWidget):
 
         try:
             state = self.video_widget.player.get_state()
-            if state is not None and state.value == 6: # Ended
+            if state is not None and state.value == 6:  # Ended
                 self._on_playback_ended()
         except Exception:
             pass
@@ -544,7 +561,9 @@ class PlayerView(QWidget):
             time_pos = self.video_widget.player.get_time()
             length = self.video_widget.player.get_length()
             if time_pos and time_pos > 0 and length and length > 0:
-                self._media_service.update_progress(self._current_media_id, time_pos, length)
+                self._media_service.update_progress(
+                    self._current_media_id, time_pos, length
+                )
         except Exception as e:
             logger.error(f"Failed to save progress: {e}")
 
@@ -555,9 +574,11 @@ class PlayerView(QWidget):
         self._inactivity_timer.stop()
         self._mouse_check_timer.stop()
         self._btn_play.setText("▶  Lecture")
-        
+
         if self.window().isFullScreen():
             self._toggle_fullscreen()
+
+        self.media_ended.emit()  # ← notify MainWindow to advance queue
 
     def _on_back(self):
         self.stop()
