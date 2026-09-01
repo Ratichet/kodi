@@ -1,41 +1,24 @@
 import logging
 from pathlib import Path
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPixmap
 from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
     QScrollArea,
-    QFrame,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QPixmap, QPainter, QColor, QLinearGradient, QBrush, QFont
+
+from core.services.tmdb_service import local_backdrop, local_poster, local_still
+from ui.widgets.artwork import gradient_placeholder, load_async
 
 logger = logging.getLogger(__name__)
 
-
-def _resolve_poster(media) -> str | None:
-    if not media.poster_path:
-        return None
-    from core.config import BASE_DIR
-
-    p = BASE_DIR / "cache" / "posters" / f"w500{media.poster_path.replace('/', '_')}"
-    return str(p) if p.exists() else None
-
-
-def _resolve_backdrop(media) -> str | None:
-    if not media.backdrop_path:
-        return None
-    from core.config import BASE_DIR
-
-    p = (
-        BASE_DIR
-        / "cache"
-        / "backdrops"
-        / f"w1280{media.backdrop_path.replace('/', '_')}"
-    )
-    return str(p) if p.exists() else None
+THUMB_W, THUMB_H = 112, 63  # 16:9
 
 
 def _format_duration(seconds: int) -> str:
@@ -180,11 +163,20 @@ class EpisodeRow(QFrame):
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(12)
 
-        # episode number
-        ep_num = ""
-        if media.season_number and media.episode_number:
-            ep_num = f"S{media.season_number:02d}E{media.episode_number:02d}"
-        num_label = QLabel(ep_num)
+        # vignette 16:9 propre à l'épisode, avec repli sur un dégradé
+        thumb = QLabel()
+        thumb.setFixedSize(THUMB_W, THUMB_H)
+        thumb.setPixmap(
+            gradient_placeholder(
+                THUMB_W, THUMB_H, seed=media.episode_title or str(media.id)
+            )
+        )
+        still = local_still(media)
+        if still:
+            load_async(still, THUMB_W, THUMB_H, thumb.setPixmap)
+        layout.addWidget(thumb)
+
+        num_label = QLabel(media.episode_code)
         num_label.setStyleSheet(
             "color: #e94560; font-weight: 700; font-size: 13px; min-width: 65px;"
         )
@@ -362,8 +354,8 @@ class DetailView(QScrollArea):
             genres=media.genres or "",
             rating=media.rating or "",
             duration=_format_duration(media.duration_sec) if media.duration_sec else "",
-            backdrop_path=_resolve_backdrop(media),
-            poster_path=_resolve_poster(media),
+            backdrop_path=local_backdrop(media),
+            poster_path=local_poster(media),
         )
 
         if media.resume_position and media.resume_position > 0 and not media.is_watched:
@@ -456,13 +448,9 @@ class DetailView(QScrollArea):
             self._episodes_container.setVisible(False)
             return
 
-        all_eps = self._media_service.search_media(media.series_name, limit=200)
-        episodes = [
-            e
-            for e in all_eps
-            if e.media_type == "episode" and e.series_name == media.series_name
-        ]
-        episodes.sort(key=lambda e: (e.season_number or 0, e.episode_number or 0))
+        # Requête ciblée : search_media(limit=200) tronquait les longues séries et
+        # ramenait des titres sans rapport.
+        episodes = self._media_service.get_series_episodes(media.series_name)
 
         if not episodes:
             self._episodes_header.setVisible(False)

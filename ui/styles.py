@@ -58,6 +58,21 @@ QPushButton#nav_button[active="true"] {{
     font-weight: 600;
 }}
 
+QPushButton#resume_player_button {{
+    background-color: {accent};
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 12px;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 600;
+}}
+
+QPushButton#resume_player_button:hover {{
+    background-color: {accent_hover};
+}}
+
 /* === Content Area === */
 QWidget#content_area {{
     background-color: {bg_content};
@@ -112,6 +127,38 @@ QLabel#card_subtitle {{
     color: {text_secondary};
     font-size: 11px;
     padding: 0px 6px 6px 6px;
+}}
+
+/* === Episode Card === */
+QFrame#episode_card {{
+    background-color: {bg_card};
+    border-radius: 8px;
+    border: 1px solid transparent;
+}}
+
+QFrame#episode_card:hover {{
+    background-color: {bg_card_hover};
+    border: 1px solid {accent};
+}}
+
+QLabel#episode_title {{
+    color: {text_primary};
+    font-size: 12px;
+    font-weight: 600;
+    padding: 8px 10px 0px 10px;
+}}
+
+QLabel#episode_meta {{
+    color: {accent};
+    font-size: 11px;
+    font-weight: 600;
+    padding: 0px 10px;
+}}
+
+QLabel#episode_overview {{
+    color: {text_secondary};
+    font-size: 11px;
+    padding: 2px 10px 8px 10px;
 }}
 
 /* === Search Bar === */

@@ -1,6 +1,7 @@
 import logging
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QScrollArea, QLabel, QFrame
+
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QFrame, QLabel, QScrollArea, QVBoxLayout, QWidget
 
 from ui.widgets.media_grid import HorizontalMediaRow
 
@@ -10,6 +11,7 @@ logger = logging.getLogger(__name__)
 class HomeView(QScrollArea):
     media_clicked = Signal(int)
     media_play = Signal(int)
+    watched_toggled = Signal(int, bool)
     navigate_to = Signal(str)
 
     def __init__(self, parent=None):
@@ -28,28 +30,21 @@ class HomeView(QScrollArea):
         header.setObjectName("page_title")
         self._main_layout.addWidget(header)
 
-        self._continue_row = HorizontalMediaRow("▶  Continuer la lecture")
-        self._continue_row.card_clicked.connect(self.media_clicked.emit)
-        self._continue_row.card_play.connect(self.media_play.emit)
-        self._main_layout.addWidget(self._continue_row)
-
-        self._recent_row = HorizontalMediaRow("🕐  Récemment ajoutés")
-        self._recent_row.card_clicked.connect(self.media_clicked.emit)
-        self._recent_row.card_play.connect(self.media_play.emit)
-        self._main_layout.addWidget(self._recent_row)
-
-        self._movies_row = HorizontalMediaRow("🎬  Films")
-        self._movies_row.card_clicked.connect(self.media_clicked.emit)
-        self._movies_row.card_play.connect(self.media_play.emit)
-        self._main_layout.addWidget(self._movies_row)
-
-        self._series_row = HorizontalMediaRow("📺  Séries")
-        self._series_row.card_clicked.connect(self.media_clicked.emit)
-        self._series_row.card_play.connect(self.media_play.emit)
-        self._main_layout.addWidget(self._series_row)
+        self._continue_row = self._add_row("▶  Continuer la lecture")
+        self._recent_row = self._add_row("🕐  Récemment ajoutés")
+        self._movies_row = self._add_row("🎬  Films")
+        self._series_row = self._add_row("📺  Épisodes")
 
         self._main_layout.addStretch()
         self.setWidget(self._container)
+
+    def _add_row(self, title: str) -> HorizontalMediaRow:
+        row = HorizontalMediaRow(title)
+        row.card_clicked.connect(self.media_clicked.emit)
+        row.card_play.connect(self.media_play.emit)
+        row.card_watched_toggled.connect(self.watched_toggled.emit)
+        self._main_layout.addWidget(row)
+        return row
 
     def refresh(self, media_service):
         try:

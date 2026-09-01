@@ -29,25 +29,12 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          pip install mutagen pyinstaller
+          pip install pyinstaller
 
+      # Même script qu'en local : les options PyInstaller ne vivent qu'à un endroit.
       - name: Build with PyInstaller
         shell: pwsh
-        run: |
-          $vlc = "C:\Program Files\VideoLAN\VLC"
-          pyinstaller --name EpiKodi --onefile --windowed `
-            --icon assets/icon.ico `
-            --add-data "$vlc;vlc_libs" `
-            --collect-all babelfish `
-            --collect-all guessit `
-            --hidden-import vlc `
-            --hidden-import PySide6.QtSvg `
-            --hidden-import babelfish.converters.alpha2 `
-            --hidden-import babelfish.converters.alpha3b `
-            --hidden-import babelfish.converters.alpha3t `
-            --hidden-import babelfish.converters.name `
-            --hidden-import babelfish.converters.opensubtitles `
-            main.py
+        run: python tools/build.py
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
@@ -77,23 +64,11 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          pip install mutagen pyinstaller
+          pip install pyinstaller
 
+      # Même script que sur Windows : il n'embarque VLC que là où c'est nécessaire.
       - name: Build with PyInstaller
-        run: |
-          pyinstaller \
-            --name EpiKodi \
-            --onefile \
-            --collect-all babelfish \
-            --collect-all guessit \
-            --hidden-import vlc \
-            --hidden-import PySide6.QtSvg \
-            --hidden-import babelfish.converters.alpha2 \
-            --hidden-import babelfish.converters.alpha3b \
-            --hidden-import babelfish.converters.alpha3t \
-            --hidden-import babelfish.converters.name \
-            --hidden-import babelfish.converters.opensubtitles \
-            main.py
+        run: python tools/build.py
 
       - name: Make executable
         run: chmod +x dist/EpiKodi
@@ -134,8 +109,9 @@ jobs:
         id: changelog
         run: |
           TAG=${GITHUB_REF_NAME}
-          if [ -f CHANGELOG.md ]; then
-            NOTES=$(awk "/^## \[?${TAG}\]?/{found=1; next} found && /^## /{exit} found{print}" CHANGELOG.md)
+          CHANGELOG=.github/CHANGELOG.md
+          if [ -s "$CHANGELOG" ]; then
+            NOTES=$(awk "/^## \[?${TAG}\]?/{found=1; next} found && /^## /{exit} found{print}" "$CHANGELOG")
           else
             NOTES="Release ${TAG}"
           fi

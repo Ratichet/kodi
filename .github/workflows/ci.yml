@@ -34,12 +34,14 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          pip install mutagen pytest pytest-cov
+          pip install pytest pytest-cov ruff
+
+      - name: Lint
+        run: ruff check --config .github/ruff.toml .
 
       - name: Run tests (offscreen display)
         env:
           QT_QPA_PLATFORM: offscreen
-          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
         run: |
           pytest test.py -v --tb=short \
             --cov=core --cov-report=term-missing \

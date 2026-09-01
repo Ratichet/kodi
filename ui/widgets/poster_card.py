@@ -1,16 +1,8 @@
-from pathlib import Path
-from PySide6.QtWidgets import QFrame, QVBoxLayout, QLabel, QGraphicsDropShadowEffect
-from PySide6.QtCore import Qt, Signal, QSize
-from PySide6.QtGui import (
-    QPixmap,
-    QPainter,
-    QColor,
-    QFont,
-    QLinearGradient,
-    QBrush,
-    QPen,
-)
+from PySide6.QtCore import QRectF, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtWidgets import QFrame, QGraphicsDropShadowEffect, QLabel, QVBoxLayout
 
+from ui.widgets.artwork import gradient_placeholder, load_async
 
 CARD_WIDTH = 155
 POSTER_HEIGHT = 225
@@ -29,10 +21,16 @@ class PosterCard(QFrame):
         poster_path: str = None,
         is_watched: bool = False,
         resume_pct: float = 0.0,
+        badge: str = "",
         parent=None,
     ):
         super().__init__(parent)
         self.media_id = media_id
+        self._is_watched = is_watched
+        self._resume_pct = resume_pct
+        self._badge = badge
+        self._hovered = False
+
         self.setObjectName("poster_card")
         self.setFixedSize(CARD_WIDTH, CARD_HEIGHT)
         self.setCursor(Qt.PointingHandCursor)
@@ -40,17 +38,11 @@ class PosterCard(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+
         self.poster_label = QLabel()
         self.poster_label.setFixedSize(CARD_WIDTH, POSTER_HEIGHT)
         self.poster_label.setAlignment(Qt.AlignCenter)
         self.poster_label.setStyleSheet("border-radius: 8px 8px 0px 0px;")
-
-        pixmap = self._load_poster(poster_path, title)
-
-        if is_watched or resume_pct > 0:
-            pixmap = self._draw_overlay(pixmap, is_watched, resume_pct)
-
-        self.poster_label.setPixmap(pixmap)
         layout.addWidget(self.poster_label)
 
         self.title_label = QLabel(self._truncate(title, 20))
@@ -68,92 +60,93 @@ class PosterCard(QFrame):
         shadow.setOffset(0, 4)
         self.setGraphicsEffect(shadow)
 
-    def _load_poster(self, poster_path: str, title: str) -> QPixmap:
-        if poster_path and Path(poster_path).exists():
-            pixmap = QPixmap(poster_path)
-            return pixmap.scaled(
-                CARD_WIDTH,
-                POSTER_HEIGHT,
-                Qt.KeepAspectRatioByExpanding,
-                Qt.SmoothTransformation,
-            ).copy(0, 0, CARD_WIDTH, POSTER_HEIGHT)
-        return self._generate_placeholder(title)
-
-    def _generate_placeholder(self, title: str) -> QPixmap:
-        pixmap = QPixmap(CARD_WIDTH, POSTER_HEIGHT)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-
-        h = hash(title) % 360
-        color1 = QColor.fromHsv(h, 120, 70)
-        color2 = QColor.fromHsv((h + 40) % 360, 100, 50)
-
-        gradient = QLinearGradient(0, 0, CARD_WIDTH, POSTER_HEIGHT)
-        gradient.setColorAt(0, color1)
-        gradient.setColorAt(1, color2)
-        painter.fillRect(pixmap.rect(), QBrush(gradient))
-
-        painter.setPen(QPen(QColor(255, 255, 255, 30), 2))
-        icon_y = POSTER_HEIGHT // 2 - 30
-        painter.drawRect(CARD_WIDTH // 2 - 25, icon_y, 50, 40)
-        for i in range(5):
-            x = CARD_WIDTH // 2 - 25 + i * 12
-            painter.drawLine(x, icon_y - 12, x + 8, icon_y)
-        painter.drawRect(CARD_WIDTH // 2 - 25, icon_y - 12, 50, 12)
-
-        painter.setPen(QColor(255, 255, 255, 180))
-        font = QFont("Segoe UI", 36, QFont.Bold)
-        painter.setFont(font)
-        initial = title[0].upper() if title else "?"
-        painter.drawText(pixmap.rect().adjusted(0, 20, 0, 0), Qt.AlignCenter, initial)
-
-        overlay = QLinearGradient(0, POSTER_HEIGHT - 60, 0, POSTER_HEIGHT)
-        overlay.setColorAt(0, QColor(0, 0, 0, 0))
-        overlay.setColorAt(1, QColor(0, 0, 0, 160))
-        painter.fillRect(0, POSTER_HEIGHT - 60, CARD_WIDTH, 60, QBrush(overlay))
-
-        painter.setPen(QColor(255, 255, 255, 220))
-        font = QFont("Segoe UI", 10)
-        painter.setFont(font)
-        text_rect = pixmap.rect().adjusted(8, 0, -8, -8)
-        painter.drawText(
-            text_rect, Qt.AlignBottom | Qt.AlignLeft, self._truncate(title, 22)
+        self._base_pixmap = gradient_placeholder(
+            CARD_WIDTH,
+            POSTER_HEIGHT,
+            seed=title,
+            caption=self._truncate(title, 22),
+            glyph=(title[:1].upper() if title else "?"),
         )
+        self._apply_pixmap()
 
-        painter.end()
-        return pixmap
+        # L'affiche arrive de façon asynchrone : ouvrir une grille de plusieurs
+        # centaines de cartes ne gèle plus l'interface.
+        if poster_path:
+            load_async(poster_path, CARD_WIDTH, POSTER_HEIGHT, self._on_poster_ready)
 
-    def _draw_overlay(
-        self, pixmap: QPixmap, is_watched: bool, resume_pct: float
-    ) -> QPixmap:
-        result = QPixmap(pixmap)
-        painter = QPainter(result)
+    # ── visuel ────────────────────────────────────────────────────────────────
+
+    def _on_poster_ready(self, pixmap: QPixmap):
+        try:
+            self._base_pixmap = pixmap
+            self._apply_pixmap()
+        except RuntimeError:
+            # Carte détruite pendant le décodage (grille rechargée entre-temps).
+            pass
+
+    def _apply_pixmap(self):
+        canvas = QPixmap(self._base_pixmap)
+        painter = QPainter(canvas)
         painter.setRenderHint(QPainter.Antialiasing)
 
-        if is_watched:
-            painter.setBrush(QColor(46, 213, 115))  # green
+        if self._hovered:
+            painter.fillRect(canvas.rect(), QColor(0, 0, 0, 80))
+            painter.setBrush(QColor(233, 69, 96))
+            painter.setPen(Qt.NoPen)
+            radius = 22
+            cx, cy = CARD_WIDTH // 2, POSTER_HEIGHT // 2
+            painter.drawEllipse(cx - radius, cy - radius, radius * 2, radius * 2)
+            triangle = QPainterPath()
+            triangle.moveTo(cx - 6, cy - 11)
+            triangle.lineTo(cx + 12, cy)
+            triangle.lineTo(cx - 6, cy + 11)
+            triangle.closeSubpath()
+            painter.fillPath(triangle, QColor("white"))
+
+        if self._badge:
+            painter.setBrush(QColor(18, 22, 41, 215))
+            painter.setPen(Qt.NoPen)
+            width = 14 + 7 * len(self._badge)
+            painter.drawRoundedRect(6, 6, width, 20, 10, 10)
+            painter.setPen(QColor("#eaeaea"))
+            painter.drawText(QRectF(6, 6, width, 20), Qt.AlignCenter, self._badge)
+
+        if self._is_watched:
+            painter.setBrush(QColor(46, 213, 115))
             painter.setPen(Qt.NoPen)
             painter.drawEllipse(CARD_WIDTH - 28, 6, 22, 22)
-
             painter.setPen(QPen(QColor(255, 255, 255), 2))
             painter.drawLine(CARD_WIDTH - 22, 17, CARD_WIDTH - 17, 22)
             painter.drawLine(CARD_WIDTH - 17, 22, CARD_WIDTH - 11, 12)
-
-        if resume_pct > 0 and not is_watched:
-            bar_h = 3
-            bar_y = POSTER_HEIGHT - bar_h
-            painter.fillRect(0, bar_y, CARD_WIDTH, bar_h, QColor(0, 0, 0, 150))
-            fill_w = int(CARD_WIDTH * min(resume_pct, 1.0))
-            painter.fillRect(0, bar_y, fill_w, bar_h, QColor(233, 69, 96))  # accent
+        elif self._resume_pct > 0:
+            bar_height = 4
+            top = POSTER_HEIGHT - bar_height
+            painter.fillRect(0, top, CARD_WIDTH, bar_height, QColor(0, 0, 0, 150))
+            painter.fillRect(
+                QRectF(0, top, CARD_WIDTH * min(self._resume_pct, 1.0), bar_height),
+                QColor(233, 69, 96),
+            )
 
         painter.end()
-        return result
+        self.poster_label.setPixmap(canvas)
 
     @staticmethod
     def _truncate(text: str, max_len: int) -> str:
         if not text:
             return ""
         return text if len(text) <= max_len else text[: max_len - 1] + "…"
+
+    # ── interactions ──────────────────────────────────────────────────────────
+
+    def enterEvent(self, event):
+        self._hovered = True
+        self._apply_pixmap()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._hovered = False
+        self._apply_pixmap()
+        super().leaveEvent(event)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:

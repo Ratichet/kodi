@@ -1,32 +1,24 @@
 import logging
-from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QScrollArea,
-    QLabel,
-    QFrame,
-)
-from PySide6.QtCore import Qt, Signal
 
-from ui.widgets.poster_card import PosterCard, CARD_HEIGHT
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
+
+from core.services.tmdb_service import local_poster
+from ui.widgets.episode_card import CARD_HEIGHT as EPISODE_CARD_HEIGHT
+from ui.widgets.episode_card import EpisodeCard
 from ui.widgets.flow_layout import FlowLayout
+from ui.widgets.poster_card import CARD_HEIGHT, PosterCard
 
 logger = logging.getLogger(__name__)
 
-
-def _get_local_poster(media) -> str:
-    if not media.poster_path:
-        return None
-
-    from core.config import BASE_DIR
-
-    cache_dir = BASE_DIR / "cache" / "posters"
-    local_path = cache_dir / f"w500{media.poster_path.replace('/', '_')}"
-
-    if local_path.exists():
-        return str(local_path)
-    return None
+ROW_HEIGHT = max(CARD_HEIGHT, EPISODE_CARD_HEIGHT) + 20
 
 
 def _make_subtitle(media) -> str:
@@ -79,7 +71,7 @@ class MediaGrid(QScrollArea):
                 if hasattr(media, "display_title")
                 else (media.title or "Unknown"),
                 subtitle=_make_subtitle(media),
-                poster_path=_get_local_poster(media),
+                poster_path=local_poster(media),
                 is_watched=media.is_watched,
                 resume_pct=_resume_pct(media),
             )
@@ -87,8 +79,11 @@ class MediaGrid(QScrollArea):
             card.play_requested.connect(self.card_play.emit)
             self._layout.addWidget(card)
             self._cards.append(card)
-            self._layout.invalidate()
-            self._container.adjustSize()
+
+        # Un seul recalcul en fin de liste : le faire par carte rendait
+        # l'affichage quadratique sur les grandes bibliothèques.
+        self._layout.invalidate()
+        self._container.adjustSize()
 
     def _clear(self):
         self._layout.clear()
@@ -99,8 +94,16 @@ class MediaGrid(QScrollArea):
 
 
 class HorizontalMediaRow(QWidget):
+    """Rangée horizontale de l'Accueil.
+
+    Un épisode est présenté par une EpisodeCard, avec sa propre vignette TMDb :
+    une PosterCard n'affiche que l'affiche de la série, identique pour tous les
+    épisodes d'une même saison.
+    """
+
     card_clicked = Signal(int)
     card_play = Signal(int)
+    card_watched_toggled = Signal(int, bool)
 
     def __init__(self, section_title: str, parent=None):
         super().__init__(parent)
@@ -117,14 +120,14 @@ class HorizontalMediaRow(QWidget):
         self._scroll.setWidgetResizable(True)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self._scroll.setFixedHeight(CARD_HEIGHT + 20)
+        self._scroll.setFixedHeight(ROW_HEIGHT)
         self._scroll.setFrameShape(QFrame.NoFrame)
 
         self._container = QWidget()
         self._h_layout = QHBoxLayout(self._container)
         self._h_layout.setContentsMargins(0, 0, 0, 0)
         self._h_layout.setSpacing(14)
-        self._h_layout.setAlignment(Qt.AlignLeft)
+        self._h_layout.setAlignment(Qt.AlignLeft | Qt.AlignTop)
 
         self._scroll.setWidget(self._container)
         layout.addWidget(self._scroll)
@@ -142,26 +145,30 @@ class HorizontalMediaRow(QWidget):
             return
 
         for media in media_list:
-            display_title = media.title or "Unknown"
-            if media.media_type == "episode" and media.series_name:
-                ep = ""
-                if media.season_number and media.episode_number:
-                    ep = f" S{media.season_number:02d}E{media.episode_number:02d}"
-                display_title = f"{media.series_name}{ep}"
-
-            card = PosterCard(
-                media_id=media.id,
-                title=display_title,
-                subtitle=_make_subtitle(media),
-                poster_path=_get_local_poster(media),
-                is_watched=media.is_watched,
-                resume_pct=_resume_pct(media),
-            )
-            card.clicked.connect(self.card_clicked.emit)
-            card.play_requested.connect(self.card_play.emit)
+            card = self._make_card(media)
             self._h_layout.addWidget(card)
             self._cards.append(card)
         self._h_layout.addStretch()
+
+    def _make_card(self, media):
+        if media.media_type == "episode":
+            card = EpisodeCard(media, series_prefix=media.series_name)
+            card.clicked.connect(self.card_play.emit)
+            card.details_requested.connect(self.card_clicked.emit)
+            card.watched_toggled.connect(self.card_watched_toggled.emit)
+            return card
+
+        card = PosterCard(
+            media_id=media.id,
+            title=media.title or "Unknown",
+            subtitle=_make_subtitle(media),
+            poster_path=local_poster(media),
+            is_watched=media.is_watched,
+            resume_pct=_resume_pct(media),
+        )
+        card.clicked.connect(self.card_clicked.emit)
+        card.play_requested.connect(self.card_play.emit)
+        return card
 
     def _clear(self):
         while self._h_layout.count():

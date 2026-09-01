@@ -1,5 +1,5 @@
+from PySide6.QtCore import QPoint, QRect, QSize, Qt
 from PySide6.QtWidgets import QLayout
-from PySide6.QtCore import Qt, QRect, QSize, QPoint
 
 
 class FlowLayout(QLayout):
@@ -73,7 +73,10 @@ class FlowLayout(QLayout):
 
         for item in self._items:
             widget = item.widget()
-            if widget and not widget.isVisible():
+            # isVisible() est faux tant que la fenêtre parente n'est pas affichée :
+            # l'utiliser ici vidait la grille au premier rendu. isHidden() ne cible
+            # que les widgets explicitement masqués.
+            if widget and widget.isHidden():
                 continue
 
             item_size = item.sizeHint()

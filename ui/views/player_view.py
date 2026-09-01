@@ -1,18 +1,22 @@
 import logging
+import threading
+import time
 from pathlib import Path
-from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QPushButton,
-    QLabel,
-    QSlider,
-    QFileDialog,
-    QMenu,
-)
-from PySide6.QtCore import Qt, QTimer, Signal, QPoint
-from PySide6.QtGui import QCursor
 
+from PySide6.QtCore import QCoreApplication, QEventLoop, QPoint, Qt, QTimer, Signal
+from PySide6.QtGui import QCursor
+from PySide6.QtWidgets import (
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QMenu,
+    QPushButton,
+    QSlider,
+    QVBoxLayout,
+    QWidget,
+)
+
+from core.power import KeepAwake
 from ui.widgets.video_widget import VideoWidget
 
 logger = logging.getLogger(__name__)
@@ -23,6 +27,8 @@ class PlayerView(QWidget):
 
     back_requested = Signal()
     media_ended = Signal()
+    next_episode_requested = Signal()
+    previous_episode_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -30,8 +36,10 @@ class PlayerView(QWidget):
         self._media_service = None
         self._current_media_id = None
         self._current_file_path = None
+        self._title = ""
         self._is_user_seeking = False
         self._subtitle_paths = []
+        self._keep_awake = KeepAwake()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -70,9 +78,18 @@ class PlayerView(QWidget):
         self._btn_back.clicked.connect(self._on_back)
         btn_layout.addWidget(self._btn_back)
 
+        # Épisode précédent (séries seulement)
+        self._btn_prev_ep = QPushButton("⏮︎ Ép.")
+        self._btn_prev_ep.setObjectName("icon_button")
+        self._btn_prev_ep.setToolTip("Épisode précédent (P)")
+        self._btn_prev_ep.setVisible(False)
+        self._btn_prev_ep.clicked.connect(self.previous_episode_requested.emit)
+        btn_layout.addWidget(self._btn_prev_ep)
+
         # Rewind
         btn_rw = QPushButton("⏮︎ 10s")
         btn_rw.setObjectName("icon_button")
+        btn_rw.setToolTip("Reculer de 10 secondes")
         btn_rw.clicked.connect(lambda: self._seek_relative(-10000))
         btn_layout.addWidget(btn_rw)
 
@@ -86,8 +103,17 @@ class PlayerView(QWidget):
         # Forward
         btn_ff = QPushButton("10s ⏭︎")
         btn_ff.setObjectName("icon_button")
+        btn_ff.setToolTip("Avancer de 10 secondes")
         btn_ff.clicked.connect(lambda: self._seek_relative(10000))
         btn_layout.addWidget(btn_ff)
+
+        # Épisode suivant (séries seulement)
+        self._btn_next_ep = QPushButton("Ép. ⏭︎")
+        self._btn_next_ep.setObjectName("icon_button")
+        self._btn_next_ep.setToolTip("Épisode suivant (N)")
+        self._btn_next_ep.setVisible(False)
+        self._btn_next_ep.clicked.connect(self.next_episode_requested.emit)
+        btn_layout.addWidget(self._btn_next_ep)
 
         # Time
         self._time_label = QLabel("00:00:00 / 00:00:00")
@@ -172,10 +198,46 @@ class PlayerView(QWidget):
     # Playback
     # =================================================================
 
+    def set_episode_navigation(self, has_previous: bool, has_next: bool):
+        """Affiche les sauts d'épisode. Masqués pour un film."""
+        for button, available in (
+            (self._btn_prev_ep, has_previous),
+            (self._btn_next_ep, has_next),
+        ):
+            button.setVisible(has_previous or has_next)
+            button.setEnabled(available)
+
+    def _new_media(self, file_path: str):
+        """Média libVLC portant les préférences de langue de l'utilisateur.
+
+        `audio-language` et `sub-language` sont des options d'entrée : posées sur
+        le média, elles prennent effet dès la lecture suivante. Passées à
+        `vlc.Instance()`, elles auraient demandé un redémarrage, l'instance libVLC
+        étant unique pour tout le processus.
+        """
+        from core.config import get_audio_language, get_subtitle_language
+
+        media = self.video_widget.instance.media_new(file_path)
+        for option, language in (
+            ("audio-language", get_audio_language()),
+            ("sub-language", get_subtitle_language()),
+        ):
+            if language:
+                media.add_option(f":{option}={language}")
+        return media
+
     def play_media(self, media, media_service=None, subtitle_paths: list = None):
         """Start playing a media item."""
         if media_service:
             self._media_service = media_service
+
+        # Enchaîner sur un autre épisode ne doit pas perdre la position courante :
+        # le timer ne la sauvegarde que toutes les 10 s.
+        if self._current_media_id is not None and self._current_media_id != media.id:
+            try:
+                self._save_progress()
+            except Exception as e:
+                logger.error(f"Failed to save progress before switching media: {e}")
 
         self._current_media_id = media.id
         self._current_file_path = media.file_path
@@ -184,6 +246,10 @@ class PlayerView(QWidget):
         if not Path(media.file_path).exists():
             logger.error(f"File not found: {media.file_path}")
             self._title_label.setText("⚠ Fichier introuvable")
+            # Rien n'est chargé : ne pas proposer de « reprendre » ce média.
+            self._current_media_id = None
+            self._current_file_path = None
+            self._title = ""
             return
 
         display = (
@@ -191,12 +257,18 @@ class PlayerView(QWidget):
             if hasattr(media, "display_title")
             else (media.title or "Unknown")
         )
+        self._title = display
         self._title_label.setText(display)
 
-        vlc_media = self.video_widget.instance.media_new(media.file_path)
+        # stop() rend la fenêtre à Qt : sans ce rattachement, la lecture suivante
+        # s'ouvrirait dans une fenêtre VLC séparée.
+        self.video_widget.attach_surface()
+
+        vlc_media = self._new_media(media.file_path)
         self.video_widget.player.set_media(vlc_media)
         self.video_widget.player.play()
         self.video_widget.player.audio_set_volume(self._vol_slider.value())
+        self._keep_awake.acquire()
 
         if media.resume_position and media.resume_position > 0 and not media.is_watched:
             QTimer.singleShot(500, lambda: self._resume_at(media.resume_position))
@@ -204,8 +276,7 @@ class PlayerView(QWidget):
         if not self._subtitle_paths:
             self._subtitle_paths = self._detect_subtitles(media.file_path)
 
-        if self._subtitle_paths:
-            QTimer.singleShot(800, lambda: self._load_subtitle(self._subtitle_paths[0]))
+        self._autoload_subtitle()
 
         self._btn_play.setText("⏸  Pause")
         self._timer.start()
@@ -215,20 +286,25 @@ class PlayerView(QWidget):
         self.setFocus()
         self._show_ui()
 
+    def current_media_id(self) -> int | None:
+        return self._current_media_id
+
     def play_file(self, file_path: str):
         """Play a file directly."""
         self._current_media_id = None
         self._current_file_path = file_path
-        self._title_label.setText(Path(file_path).stem)
+        self._title = Path(file_path).stem
+        self._title_label.setText(self._title)
         self._subtitle_paths = self._detect_subtitles(file_path)
 
-        vlc_media = self.video_widget.instance.media_new(file_path)
+        self.video_widget.attach_surface()
+        vlc_media = self._new_media(file_path)
         self.video_widget.player.set_media(vlc_media)
         self.video_widget.player.play()
         self.video_widget.player.audio_set_volume(self._vol_slider.value())
+        self._keep_awake.acquire()
 
-        if self._subtitle_paths:
-            QTimer.singleShot(800, lambda: self._load_subtitle(self._subtitle_paths[0]))
+        self._autoload_subtitle()
 
         self._btn_play.setText("⏸  Pause")
         self._timer.start()
@@ -243,6 +319,7 @@ class PlayerView(QWidget):
         self._save_timer.stop()
         self._inactivity_timer.stop()
         self._mouse_check_timer.stop()
+        self._keep_awake.release()
 
         # 2. Sauvegarde de la progression
         try:
@@ -252,10 +329,7 @@ class PlayerView(QWidget):
 
         # 3. CRITIQUE : On arrête VLC AVANT de toucher à l'interface graphique
         # Cela évite les erreurs "Direct3D" et "hardware acceleration"
-        try:
-            self.video_widget.player.stop()
-        except Exception as e:
-            logger.error(f"VLC stop error: {e}")
+        self._stop_vlc()
 
         # 4. Maintenant on peut modifier l'UI (quitter plein écran, etc.)
         if self.window().isFullScreen():
@@ -265,6 +339,117 @@ class PlayerView(QWidget):
         self._btn_play.setText("▶  Lecture")
         self._current_media_id = None
         self._current_file_path = None
+        self._title = ""
+
+    def _stop_vlc(self, timeout: float = 5.0) -> bool:
+        """Arrête libVLC sans risquer de figer l'application.
+
+        `libvlc_media_player_stop()` se bloque définitivement s'il est appelé
+        depuis le thread graphique pendant que VLC monte sa sortie Direct3D sur la
+        fenêtre : la sortie attend la boucle de messages, laquelle attend stop().
+        On rend donc la fenêtre à Qt d'abord, on arrête depuis un thread annexe, et
+        on continue de faire tourner la boucle de messages pendant l'attente.
+        """
+        if self.video_widget.is_released():
+            # Toucher un lecteur libéré provoque une violation d'accès.
+            return True
+
+        self.video_widget.detach_surface()
+
+        done = threading.Event()
+
+        def _worker():
+            try:
+                self.video_widget.player.stop()
+            except Exception as e:
+                logger.error(f"VLC stop error: {e}")
+            finally:
+                done.set()
+
+        threading.Thread(target=_worker, name="epikodi-vlc-stop", daemon=True).start()
+
+        deadline = time.monotonic() + timeout
+        while not done.wait(0.02):
+            if time.monotonic() > deadline:
+                logger.warning(
+                    f"VLC did not stop within {timeout}s; carrying on without it."
+                )
+                return False
+            # Indispensable : c'est ce qui permet à la sortie vidéo de se démonter.
+            QCoreApplication.processEvents(QEventLoop.ExcludeUserInputEvents, 20)
+        return True
+
+    def shutdown(self):
+        """Arrêt définitif, à la fermeture. Sans effet si déjà appelé."""
+        if self.video_widget.is_released():
+            return
+        try:
+            self.stop()
+        except Exception as e:
+            logger.error(f"Error while stopping the player: {e}")
+        self.video_widget.release()
+
+    # =================================================================
+    # Mise en veille pendant qu'on navigue ailleurs
+    # =================================================================
+
+    def has_media(self) -> bool:
+        """Un média est chargé et peut être repris."""
+        return self._current_file_path is not None
+
+    def current_title(self) -> str:
+        return self._title
+
+    def suspend(self):
+        """Met la lecture en pause quand on quitte le lecteur pour une autre vue.
+
+        Le média reste chargé : `resume()` reprend là où on s'est arrêté. Sans
+        cela, le son continuait dans le dos de l'utilisateur.
+        """
+        if not self.has_media():
+            return
+
+        # Quitter le plein écran avant tout : sinon la fenêtre resterait en plein
+        # écran sur une vue qui n'est plus le lecteur.
+        if self.window().isFullScreen():
+            self._toggle_fullscreen()
+
+        try:
+            self._save_progress()
+        except Exception as e:
+            logger.error(f"Failed to save progress on suspend: {e}")
+
+        try:
+            if self.video_widget.player.is_playing():
+                self.video_widget.player.pause()
+        except Exception as e:
+            logger.error(f"VLC pause error: {e}")
+
+        # La lecture est en pause : plus rien ne justifie de tenir l'écran éveillé.
+        self._keep_awake.release()
+
+        # Inutile d'interroger VLC 5 fois par seconde pour une vue masquée.
+        self._timer.stop()
+        self._save_timer.stop()
+        self._inactivity_timer.stop()
+        self._mouse_check_timer.stop()
+        self._btn_play.setText("▶  Lecture")
+        self.setCursor(Qt.ArrowCursor)
+
+    def resume(self):
+        """Reprend la lecture suspendue par `suspend()`."""
+        if not self.has_media():
+            return
+        try:
+            self.video_widget.player.play()
+            self._btn_play.setText("⏸  Pause")
+            self._keep_awake.acquire()
+        except Exception as e:
+            logger.error(f"VLC resume error: {e}")
+        self._timer.start()
+        self._save_timer.start()
+        self.setFocus()
+        self._show_ui()
 
     def _resume_at(self, position_ms: int):
         if self.video_widget.player.is_playing():
@@ -284,6 +469,7 @@ class PlayerView(QWidget):
                     self._inactivity_timer.start()
         except Exception as e:
             logger.error(f"Toggle play error: {e}")
+        self._sync_keep_awake()
 
     def _set_volume(self, value):
         try:
@@ -350,12 +536,23 @@ class PlayerView(QWidget):
         self._toggle_fullscreen()
 
     def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Escape and self.window().isFullScreen():
+        key = event.key()
+        if key == Qt.Key_Escape and self.window().isFullScreen():
             self._toggle_fullscreen()
-        elif event.key() == Qt.Key_F:
+        elif key == Qt.Key_F:
             self._toggle_fullscreen()
-        elif event.key() == Qt.Key_Space:
+        elif key == Qt.Key_Space:
             self._toggle_play()
+        elif key == Qt.Key_Left:
+            self._seek_relative(-10000)
+        elif key == Qt.Key_Right:
+            self._seek_relative(10000)
+        elif key == Qt.Key_N and self._btn_next_ep.isEnabled():
+            self._show_ui()
+            self.next_episode_requested.emit()
+        elif key == Qt.Key_P and self._btn_prev_ep.isEnabled():
+            self._show_ui()
+            self.previous_episode_requested.emit()
         else:
             super().keyPressEvent(event)
 
@@ -396,7 +593,10 @@ class PlayerView(QWidget):
         if not file_path:
             return []
 
-        from core.config import SUPPORTED_SUBTITLE_EXTENSIONS
+        from core.config import (
+            SUBTITLE_LANGUAGE_SUFFIXES,
+            SUPPORTED_SUBTITLE_EXTENSIONS,
+        )
 
         media_path = Path(file_path)
         parent = media_path.parent
@@ -410,12 +610,46 @@ class PlayerView(QWidget):
             candidate = parent / f"{stem}{ext}"
             if candidate.exists():
                 found.append(str(candidate))
-            for lang in ["fr", "en", "es", "de", "it", "pt", "ja", "zh"]:
+            for lang in SUBTITLE_LANGUAGE_SUFFIXES:
                 candidate = parent / f"{stem}.{lang}{ext}"
                 if candidate.exists():
                     found.append(str(candidate))
 
         return sorted(set(found))
+
+    def _autoload_subtitle(self):
+        """Charge le sous-titre externe correspondant à la langue préférée.
+
+        Sans préférence — ou sans fichier dans cette langue — le premier trouvé est
+        gardé, comme avant. Un fichier externe l'emporte sur la piste intégrée que
+        `sub-language` aurait sélectionnée : c'est le choix le plus explicite des deux.
+        """
+        if not self._subtitle_paths:
+            return
+
+        from core.config import get_subtitle_language
+
+        chosen = self._subtitle_paths[0]
+        for code in get_subtitle_language().lower().split(","):
+            code = code.strip()
+            if not code:
+                continue
+            # Le code doit être un segment entier du nom : « Film.fr.srt » compte,
+            # « Frozen.srt » non.
+            match = next(
+                (
+                    path
+                    for path in self._subtitle_paths
+                    if code in Path(path).stem.lower().split(".")
+                ),
+                None,
+            )
+            if match:
+                chosen = match
+                break
+
+        # 800 ms : VLC rejette un sous-titre tant que le média n'est pas ouvert.
+        QTimer.singleShot(800, lambda: self._load_subtitle(chosen))
 
     def _load_subtitle(self, sub_path: str):
         if not Path(sub_path).exists():
@@ -466,7 +700,15 @@ class PlayerView(QWidget):
         menu.exec(self._btn_subs.mapToGlobal(self._btn_subs.rect().topLeft()))
 
     def _create_popup_menu(self):
-        menu = QMenu(self)
+        """Menu stylé, parenté à la fenêtre principale et non au lecteur.
+
+        VLC réclame le `winId()` du widget vidéo, ce qui rend natifs tous ses
+        ancêtres — dont cette vue. Un popup parenté ici recevrait donc comme
+        parent transitoire une fenêtre qui n'est pas de premier niveau : Qt
+        refuse (« must be a top level window ») et le menu peut alors passer
+        sous la vidéo en plein écran.
+        """
+        menu = QMenu(self.window())
         menu.setStyleSheet("""
             QMenu {
                 background-color: #1e2a4a;
@@ -491,8 +733,10 @@ class PlayerView(QWidget):
         if self._current_file_path:
             start_dir = str(Path(self._current_file_path).parent)
 
+        # Parent = la fenêtre principale, pour la même raison que
+        # `_create_popup_menu` : la surface native de VLC.
         sub_path, _ = QFileDialog.getOpenFileName(
-            self,
+            self.window(),
             "Charger un fichier de sous-titres",
             start_dir,
             "Sous-titres (*.srt *.sub *.ass *.ssa *.vtt);;Tous (*)",
@@ -530,9 +774,27 @@ class PlayerView(QWidget):
             logger.error(f"Seek release error: {e}")
         self._is_user_seeking = False
 
-    def _update_ui(self):
-        if self._is_user_seeking:
+    def _sync_keep_awake(self):
+        """Aligne l'inhibition de veille sur ce que fait réellement le lecteur.
+
+        Piloté par le timer d'interface, ce rappel régulier repose aussi
+        l'inhibition : Windows l'oublie après un verrouillage de session ou un
+        changement de mode d'alimentation.
+        """
+        if self.video_widget.is_released():
+            self._keep_awake.release()
             return
+        try:
+            playing = bool(self.video_widget.player.is_playing())
+        except Exception:
+            playing = False
+        self._keep_awake.set_active(playing)
+
+    def _update_ui(self):
+        if self._is_user_seeking or self.video_widget.is_released():
+            return
+
+        self._sync_keep_awake()
 
         try:
             length = self.video_widget.player.get_length()
@@ -557,6 +819,8 @@ class PlayerView(QWidget):
     def _save_progress(self):
         if not self._media_service or not self._current_media_id:
             return
+        if self.video_widget.is_released():
+            return
         try:
             time_pos = self.video_widget.player.get_time()
             length = self.video_widget.player.get_length()
@@ -573,6 +837,7 @@ class PlayerView(QWidget):
         self._save_timer.stop()
         self._inactivity_timer.stop()
         self._mouse_check_timer.stop()
+        self._keep_awake.release()
         self._btn_play.setText("▶  Lecture")
 
         if self.window().isFullScreen():

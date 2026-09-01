@@ -1,11 +1,12 @@
 import logging
+from collections.abc import Callable
 from datetime import datetime
-from typing import Optional, List, Callable
-from sqlalchemy.orm import Session
+
 from sqlalchemy import or_
+from sqlalchemy.orm import Session
 
 from core.database import SessionLocal
-from core.models import Media, MediaDirectory, Playlist, PlaylistItem
+from core.models import Media, MediaDirectory
 from core.services.scanner import MediaIndexer, MediaWatcher
 
 logger = logging.getLogger(__name__)
@@ -22,7 +23,7 @@ class MediaService:
         self._db = db
         self._owns_session = db is None
         self.indexer = MediaIndexer()
-        self.watcher = MediaWatcher()
+        self._watcher = None
 
     @property
     def db(self) -> Session:
@@ -30,12 +31,21 @@ class MediaService:
             self._db = SessionLocal()
         return self._db
 
+    @property
+    def watcher(self) -> MediaWatcher:
+        # Créé à la demande : un MediaWatcher alloue un thread Observer, inutile
+        # tant que personne ne surveille de dossier.
+        if self._watcher is None:
+            self._watcher = MediaWatcher()
+        return self._watcher
+
     def close(self):
-        try:
-            if hasattr(self, "watcher"):
-                self.watcher.stop()
-        except Exception:
-            pass
+        if self._watcher is not None:
+            try:
+                self._watcher.stop()
+            except Exception as e:
+                logger.warning(f"Could not stop media watcher: {e}")
+            self._watcher = None
         if self._owns_session and self._db:
             self._db.close()
             self._db = None
@@ -46,7 +56,7 @@ class MediaService:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
-    def get_all_media(self, media_type: str = None, limit: int = None) -> List[Media]:
+    def get_all_media(self, media_type: str = None, limit: int = None) -> list[Media]:
         query = self.db.query(Media)
         if media_type:
             query = query.filter(Media.media_type == media_type)
@@ -55,53 +65,29 @@ class MediaService:
             query = query.limit(limit)
         return query.all()
 
-    def get_movies(self, limit: int = None) -> List[Media]:
+    def get_movies(self, limit: int = None) -> list[Media]:
         return self.get_all_media(media_type="movie", limit=limit)
 
-    def get_episodes(self, limit: int = None) -> List[Media]:
+    def get_episodes(self, limit: int = None) -> list[Media]:
         return self.get_all_media(media_type="episode", limit=limit)
 
-    def get_music(self, limit: int = None) -> List[Media]:
-        query = (
+    def get_series_episodes(self, series_name: str) -> list[Media]:
+        """Tous les épisodes d'une série, triés par saison puis numéro."""
+        return (
             self.db.query(Media)
-            .filter(Media.media_type == "music")
+            .filter(Media.media_type == "episode")
+            .filter(Media.series_name == series_name)
             .order_by(
-                Media.artist.nullslast(),
-                Media.album.nullslast(),
-                Media.track_number.nullslast(),
-                Media.title,
+                Media.season_number.nullsfirst(),
+                Media.episode_number.nullsfirst(),
             )
-        )
-        if limit:
-            query = query.limit(limit)
-        return query.all()
-
-    def get_music_artists(self) -> List[str]:
-        rows = (
-            self.db.query(Media.artist)
-            .filter(Media.media_type == "music")
-            .filter(Media.artist.isnot(None))
-            .distinct()
-            .order_by(Media.artist)
             .all()
         )
-        return [r[0] for r in rows]
 
-    def get_music_albums(self, artist: str = None) -> List[str]:
-        query = (
-            self.db.query(Media.album)
-            .filter(Media.media_type == "music")
-            .filter(Media.album.isnot(None))
-        )
-        if artist:
-            query = query.filter(Media.artist == artist)
-        rows = query.distinct().order_by(Media.album).all()
-        return [r[0] for r in rows]
-
-    def get_recently_added(self, limit: int = 20) -> List[Media]:
+    def get_recently_added(self, limit: int = 20) -> list[Media]:
         return self.db.query(Media).order_by(Media.created_at.desc()).limit(limit).all()
 
-    def get_recently_watched(self, limit: int = 20) -> List[Media]:
+    def get_recently_watched(self, limit: int = 20) -> list[Media]:
         return (
             self.db.query(Media)
             .filter(Media.last_played.isnot(None))
@@ -110,7 +96,7 @@ class MediaService:
             .all()
         )
 
-    def get_in_progress(self, limit: int = 20) -> List[Media]:
+    def get_in_progress(self, limit: int = 20) -> list[Media]:
         return (
             self.db.query(Media)
             .filter(Media.resume_position > 0)
@@ -120,13 +106,16 @@ class MediaService:
             .all()
         )
 
-    def get_media_by_id(self, media_id: int) -> Optional[Media]:
+    def get_media_by_id(self, media_id: int) -> Media | None:
         return self.db.query(Media).filter(Media.id == media_id).first()
 
-    def get_media_by_path(self, file_path: str) -> Optional[Media]:
+    def get_media_by_path(self, file_path: str) -> Media | None:
         return self.db.query(Media).filter(Media.file_path == file_path).first()
 
-    def search_media(self, query: str, limit: int = 50) -> List[Media]:
+    def search_media(self, query: str, limit: int = 50) -> list[Media]:
+        # Les motifs par début de mot ci-dessous ne supportent pas une espace
+        # de tête : « % hanks% » ne rencontrerait jamais « Tom Hanks ».
+        query = query.strip()
         search_term = f"%{query}%"
         return (
             self.db.query(Media)
@@ -134,8 +123,12 @@ class MediaService:
                 or_(
                     Media.title.ilike(search_term),
                     Media.series_name.ilike(search_term),
-                    Media.artist.ilike(search_term),
-                    Media.album.ilike(search_term),
+                    Media.episode_title.ilike(search_term),
+                    # Les acteurs se cherchent par début de mot, comme dans les
+                    # vues : « an » ne doit pas ramener toutes les Susan. Les noms
+                    # sont séparés par « , », un début de nom suit donc un espace.
+                    Media.actors.ilike(f"{query}%"),
+                    Media.actors.ilike(f"% {query}%"),
                 )
             )
             .order_by(Media.title)
@@ -149,7 +142,7 @@ class MediaService:
         year: int = None,
         genre: str = None,
         is_watched: bool = None,
-    ) -> List[Media]:
+    ) -> list[Media]:
         query = self.db.query(Media)
         if media_type:
             query = query.filter(Media.media_type == media_type)
@@ -169,9 +162,9 @@ class MediaService:
         media.last_played = datetime.now()
         if duration_ms:
             media.duration_sec = duration_ms // 1000
-            if position_ms >= duration_ms * 0.9:
+            if position_ms >= duration_ms * 0.9 and not media.is_watched:
                 media.is_watched = True
-                media.watch_count += 1
+                media.watch_count = (media.watch_count or 0) + 1
                 media.resume_position = 0
         self.db.commit()
 
@@ -179,9 +172,17 @@ class MediaService:
         media = self.get_media_by_id(media_id)
         if media:
             media.is_watched = True
-            media.watch_count += 1
+            media.watch_count = (media.watch_count or 0) + 1
             media.resume_position = 0
             media.last_played = datetime.now()
+            self.db.commit()
+
+    def mark_as_unwatched(self, media_id: int):
+        media = self.get_media_by_id(media_id)
+        if media:
+            media.is_watched = False
+            media.watch_count = 0
+            media.resume_position = 0
             self.db.commit()
 
     def add_media_directory(self, path: str, recursive: bool = True) -> MediaDirectory:
@@ -196,11 +197,14 @@ class MediaService:
         self.db.add(directory)
         self.db.commit()
         self.db.refresh(directory)
-        if self.watcher.is_running():
-            self.watcher.watch(path, recursive=recursive)
+        if self._watcher is not None:
+            self._watcher.watch(path, recursive=recursive)
+            # Premier dossier ajouté après le démarrage : rien n'était surveillé.
+            if not self._watcher.is_running():
+                self._watcher.start()
         return directory
 
-    def get_media_directories(self, active_only: bool = True) -> List[MediaDirectory]:
+    def get_media_directories(self, active_only: bool = True) -> list[MediaDirectory]:
         query = self.db.query(MediaDirectory)
         if active_only:
             query = query.filter(MediaDirectory.is_active == True)
@@ -213,14 +217,37 @@ class MediaService:
             .first()
         )
         if directory:
-            if self.watcher.is_running():
-                self.watcher.unwatch(directory.path)
+            if self._watcher is not None:
+                self._watcher.unwatch(directory.path)
             self.db.delete(directory)
             self.db.commit()
             return True
         return False
 
-    def scan_all_directories(self) -> List[Media]:
+    def start_watching(
+        self, on_change: Callable = None, auto_enrich: bool = True
+    ) -> bool:
+        """Surveille en temps réel les dossiers actifs de la bibliothèque.
+
+        `on_change` est appelé depuis le thread de surveillance après chaque
+        modification effective ; il doit être sûr hors du thread appelant.
+        Renvoie False s'il n'y a aucun dossier à surveiller.
+        """
+        watcher = self.watcher
+        watcher.set_on_change(on_change)
+        watcher.auto_enrich = auto_enrich
+        for directory in self.get_media_directories(active_only=True):
+            watcher.watch(directory.path, recursive=bool(directory.recursive))
+        return watcher.start()
+
+    def stop_watching(self):
+        if self._watcher is not None:
+            self._watcher.stop()
+
+    def is_watching(self) -> bool:
+        return self._watcher is not None and self._watcher.is_running()
+
+    def scan_all_directories(self) -> list[Media]:
         self.cleanup_library()
         directories = self.get_media_directories(active_only=True)
         all_media = []
@@ -232,14 +259,12 @@ class MediaService:
         return all_media
 
     def get_stats(self) -> dict:
-        music_count = self.db.query(Media).filter(Media.media_type == "music").count()
         return {
             "total_media": self.db.query(Media).count(),
             "movies": self.db.query(Media).filter(Media.media_type == "movie").count(),
             "episodes": self.db.query(Media)
             .filter(Media.media_type == "episode")
             .count(),
-            "music": music_count,
             "watched": self.db.query(Media).filter(Media.is_watched == True).count(),
             "in_progress": self.db.query(Media)
             .filter(Media.resume_position > 0, Media.is_watched == False)
@@ -266,34 +291,65 @@ class MediaService:
     def enrich_all_media(
         self, limit: int = None, progress_callback: Callable = None
     ) -> dict:
-        query = self.db.query(Media).filter(
-            Media.tmdb_id.is_(None),
-            Media.media_type != "music",
-        )
-        if limit:
-            query = query.limit(limit)
-        media_list = query.all()
-        total = len(media_list)
-        stats = {"success": 0, "failed": 0}
-        enricher = _get_tmdb_enricher()
-        for i, media in enumerate(media_list, 1):
-            if progress_callback:
-                progress_callback(i, total, media.title or media.file_path)
-            if enricher.enrich_media(media):
-                stats["success"] += 1
-            else:
-                stats["failed"] += 1
-        return stats
+        # Session dédiée : cette méthode est appelée depuis un thread de travail,
+        # une Session SQLAlchemy ne peut pas être partagée entre threads.
+        db = SessionLocal()
+        try:
+            query = db.query(Media).filter(Media.tmdb_id.is_(None))
+            if limit:
+                query = query.limit(limit)
+            media_list = query.all()
+            total = len(media_list)
+            stats = {"success": 0, "failed": 0}
+            enricher = _get_tmdb_enricher()
+            for i, media in enumerate(media_list, 1):
+                if progress_callback:
+                    progress_callback(i, total, media.title or media.file_path)
+                if enricher.enrich_media(media, db=db):
+                    stats["success"] += 1
+                else:
+                    stats["failed"] += 1
+            return stats
+        finally:
+            db.close()
 
-    def download_all_posters(self) -> dict:
+    def re_enrich_all_media(
+        self, progress_callback: Callable = None
+    ) -> dict:
+        db = SessionLocal()
+        try:
+            media_list = db.query(Media).filter(Media.tmdb_id.isnot(None)).all()
+            total = len(media_list)
+            stats = {"success": 0, "failed": 0}
+            enricher = _get_tmdb_enricher()
+            for i, media in enumerate(media_list, 1):
+                if progress_callback:
+                    progress_callback(i, total, media.title or media.file_path)
+                if enricher.re_enrich_media(media, db=db):
+                    stats["success"] += 1
+                else:
+                    stats["failed"] += 1
+            return stats
+        finally:
+            db.close()
+
+    def fill_missing_details(self, progress_callback: Callable = None) -> dict:
         enricher = _get_tmdb_enricher()
-        return enricher.download_all_posters()
+        return enricher.fill_missing_details(progress_callback=progress_callback)
+
+    def download_all_artwork(self, progress_callback: Callable = None) -> dict:
+        enricher = _get_tmdb_enricher()
+        return enricher.download_all_artwork(progress_callback=progress_callback)
 
     def reset_database(self) -> bool:
         try:
             from core.database import Base, engine
 
-            self.close()
+            # La session courante doit être fermée avant de supprimer les tables,
+            # sinon elle garde des objets pointant sur des lignes disparues.
+            if self._owns_session and self._db:
+                self._db.close()
+                self._db = None
             Base.metadata.drop_all(bind=engine)
             Base.metadata.create_all(bind=engine)
             logger.info("Database reset successfully.")
@@ -301,106 +357,3 @@ class MediaService:
         except Exception as e:
             logger.error(f"Error resetting database: {e}")
             return False
-
-    def get_playlists(self) -> List[Playlist]:
-        return self.db.query(Playlist).order_by(Playlist.name).all()
-
-    def get_playlist(self, playlist_id: int) -> Optional[Playlist]:
-        return self.db.query(Playlist).filter(Playlist.id == playlist_id).first()
-
-    def create_playlist(self, name: str, description: str = "") -> Playlist:
-        pl = Playlist(name=name, description=description)
-        self.db.add(pl)
-        self.db.commit()
-        self.db.refresh(pl)
-        logger.info(f"Playlist created: '{name}' (id={pl.id})")
-        return pl
-
-    def rename_playlist(self, playlist_id: int, new_name: str) -> bool:
-        pl = self.get_playlist(playlist_id)
-        if not pl:
-            return False
-        pl.name = new_name
-        self.db.commit()
-        return True
-
-    def delete_playlist(self, playlist_id: int) -> bool:
-        pl = self.get_playlist(playlist_id)
-        if not pl:
-            return False
-        self.db.delete(pl)
-        self.db.commit()
-        logger.info(f"Playlist deleted: id={playlist_id}")
-        return True
-
-    def add_to_playlist(
-        self, playlist_id: int, media_id: int
-    ) -> Optional[PlaylistItem]:
-        """Append a media to a playlist (avoids duplicates)."""
-        pl = self.get_playlist(playlist_id)
-        if not pl:
-            return None
-        # duplicate check
-        existing = (
-            self.db.query(PlaylistItem)
-            .filter(
-                PlaylistItem.playlist_id == playlist_id,
-                PlaylistItem.media_id == media_id,
-            )
-            .first()
-        )
-        if existing:
-            return existing
-        next_pos = len(pl.items)
-        item = PlaylistItem(
-            playlist_id=playlist_id, media_id=media_id, position=next_pos
-        )
-        self.db.add(item)
-        self.db.commit()
-        self.db.refresh(item)
-        return item
-
-    def remove_from_playlist(self, playlist_id: int, media_id: int) -> bool:
-        item = (
-            self.db.query(PlaylistItem)
-            .filter(
-                PlaylistItem.playlist_id == playlist_id,
-                PlaylistItem.media_id == media_id,
-            )
-            .first()
-        )
-        if not item:
-            return False
-        self.db.delete(item)
-        remaining = (
-            self.db.query(PlaylistItem)
-            .filter(PlaylistItem.playlist_id == playlist_id)
-            .order_by(PlaylistItem.position)
-            .all()
-        )
-        for i, r in enumerate(remaining):
-            r.position = i
-        self.db.commit()
-        return True
-
-    def reorder_playlist(self, playlist_id: int, ordered_media_ids: List[int]) -> bool:
-        items = (
-            self.db.query(PlaylistItem)
-            .filter(PlaylistItem.playlist_id == playlist_id)
-            .all()
-        )
-        item_map = {i.media_id: i for i in items}
-        for pos, mid in enumerate(ordered_media_ids):
-            if mid in item_map:
-                item_map[mid].position = pos
-        self.db.commit()
-        return True
-
-    def get_playlist_tracks(self, playlist_id: int) -> List[Media]:
-        items = (
-            self.db.query(PlaylistItem)
-            .filter(PlaylistItem.playlist_id == playlist_id)
-            .order_by(PlaylistItem.position)
-            .all()
-        )
-        return [item.media for item in items if item.media]

@@ -1,14 +1,15 @@
 import logging
+
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
+    QComboBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QComboBox,
-    QFrame,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt, Signal, QTimer
 
 from ui.widgets.media_grid import MediaGrid
 
@@ -48,7 +49,7 @@ class MoviesView(QWidget):
 
         self._search = QLineEdit()
         self._search.setObjectName("search_bar")
-        self._search.setPlaceholderText("Rechercher un film...")
+        self._search.setPlaceholderText("Rechercher un film ou un acteur...")
         self._search.setMinimumWidth(250)
         self._search.setMaximumWidth(400)
         self._search.setClearButtonEnabled(True)
@@ -70,6 +71,15 @@ class MoviesView(QWidget):
         self._watched_filter.addItem("Vus", "watched")
         self._watched_filter.setMinimumWidth(120)
         filter_layout.addWidget(self._watched_filter)
+
+        self._sort = QComboBox()
+        self._sort.addItem("Titre (A→Z)", "title")
+        self._sort.addItem("Plus récents", "year_desc")
+        self._sort.addItem("Plus anciens", "year_asc")
+        self._sort.addItem("Mieux notés", "rating")
+        self._sort.addItem("Ajoutés récemment", "added")
+        self._sort.setMinimumWidth(150)
+        filter_layout.addWidget(self._sort)
         layout.addLayout(filter_layout)
         sep = QFrame()
         sep.setFrameShape(QFrame.HLine)
@@ -97,6 +107,7 @@ class MoviesView(QWidget):
         self._genre_filter.currentIndexChanged.connect(self._apply_filters)
         self._year_filter.currentIndexChanged.connect(self._apply_filters)
         self._watched_filter.currentIndexChanged.connect(self._apply_filters)
+        self._sort.currentIndexChanged.connect(self._apply_filters)
 
     def refresh(self, media_service):
         self._media_service = media_service
@@ -151,7 +162,7 @@ class MoviesView(QWidget):
         for movie in self._all_movies:
             if search_text:
                 title = (movie.title or "").lower()
-                if search_text not in title:
+                if search_text not in title and not movie.has_actor(search_text):
                     continue
             if genre:
                 movie_genres = (movie.genres or "").lower()
@@ -165,12 +176,37 @@ class MoviesView(QWidget):
                 continue
 
             filtered.append(movie)
-        self._grid.set_media_list(filtered)
+
+        self._grid.set_media_list(self._sorted(filtered))
         self._count_label.setText(
             f"{len(filtered)} film{'s' if len(filtered) != 1 else ''}"
         )
         has_items = len(filtered) > 0
         self._grid.setVisible(has_items)
         self._empty_label.setVisible(not has_items)
-        if has_items:
-            QTimer.singleShot(10, lambda: self._grid._container.adjustSize())
+        self._empty_label.setText(
+            "Aucun film ne correspond à ces filtres."
+            if self._all_movies
+            else "Aucun film trouvé.\n"
+            "Ajoutez un dossier dans les paramètres pour scanner vos médias."
+        )
+
+    def _sorted(self, movies: list) -> list:
+        mode = self._sort.currentData()
+        if mode == "year_desc":
+            return sorted(movies, key=lambda m: (m.year or 0), reverse=True)
+        if mode == "year_asc":
+            return sorted(movies, key=lambda m: (m.year or 9999))
+        if mode == "rating":
+            return sorted(movies, key=self._rating_value, reverse=True)
+        if mode == "added":
+            return sorted(movies, key=lambda m: (m.created_at or m.id), reverse=True)
+        return sorted(movies, key=lambda m: (m.title or "").lower())
+
+    @staticmethod
+    def _rating_value(media) -> float:
+        # `rating` est stocké au format « 7.4/10 ».
+        try:
+            return float((media.rating or "0").split("/")[0])
+        except (ValueError, AttributeError):
+            return 0.0

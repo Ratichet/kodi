@@ -1,5 +1,6 @@
 # Environment & secrets
 .env
+settings.json
 
 # Python
 __pycache__/
@@ -8,11 +9,18 @@ __pycache__/
 .venv/
 venv/
 
-# Database
+# Database (le mode WAL crée aussi des fichiers -wal / -shm)
 *.db
+*.db-wal
+*.db-shm
 
 # Cache (posters, backdrops)
 cache/
+
+# Sorties de PyInstaller
+build/
+dist/
+*.spec
 
 # IDE
 .vscode/

@@ -5,4 +5,4 @@ requests>=2.31.0
 Pillow>=10.0.0
 watchdog>=3.0.0
 guessit==3.8.0
-python-dotenv>=1.0.0
+

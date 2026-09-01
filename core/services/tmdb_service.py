@@ -1,16 +1,17 @@
 import logging
-import requests
-from pathlib import Path
-from typing import Optional, List, Dict, Any
-from dataclasses import dataclass, field
 import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import requests
 
 from core.config import (
-    TMDB_API_KEY,
-    TMDB_LANGUAGE,
+    BASE_DIR,
     TMDB_BASE_URL,
     TMDB_IMAGE_BASE_URL,
-    BASE_DIR,
+    get_tmdb_api_key,
+    get_tmdb_language,
 )
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,40 @@ logger = logging.getLogger(__name__)
 # cache directories for pictures
 POSTER_CACHE_DIR = BASE_DIR / "cache" / "posters"
 BACKDROP_CACHE_DIR = BASE_DIR / "cache" / "backdrops"
+STILL_CACHE_DIR = BASE_DIR / "cache" / "stills"
+
+POSTER_SIZE = "w500"
+BACKDROP_SIZE = "w1280"
+STILL_SIZE = "w300"
+
+
+def cast_names(cast: list[dict[str, str]]) -> str:
+    """Casting sérialisé pour la base : « Tom Hanks, Robin Wright »."""
+    return ", ".join(actor["name"] for actor in cast if actor.get("name"))
+
+
+def cached_image_path(image_path: str, size: str, cache_dir: Path) -> Path:
+    """Emplacement sur disque d'une image TMDb (même règle qu'au téléchargement)."""
+    return cache_dir / f"{size}{image_path.replace('/', '_')}"
+
+
+def local_poster(media) -> str | None:
+    return _local_image(media.poster_path, POSTER_SIZE, POSTER_CACHE_DIR)
+
+
+def local_backdrop(media) -> str | None:
+    return _local_image(media.backdrop_path, BACKDROP_SIZE, BACKDROP_CACHE_DIR)
+
+
+def local_still(media) -> str | None:
+    return _local_image(getattr(media, "still_path", None), STILL_SIZE, STILL_CACHE_DIR)
+
+
+def _local_image(image_path: str, size: str, cache_dir: Path) -> str | None:
+    if not image_path:
+        return None
+    path = cached_image_path(image_path, size, cache_dir)
+    return str(path) if path.exists() else None
 
 
 @dataclass
@@ -26,27 +61,27 @@ class TMDbMovie:
     tmdb_id: int
     title: str
     original_title: str = ""
-    year: Optional[int] = None
+    year: int | None = None
     release_date: str = ""
     overview: str = ""
-    poster_path: Optional[str] = None
-    backdrop_path: Optional[str] = None
-    genres: List[str] = field(default_factory=list)
+    poster_path: str | None = None
+    backdrop_path: str | None = None
+    genres: list[str] = field(default_factory=list)
     rating: float = 0.0
     vote_count: int = 0
-    runtime: Optional[int] = None
+    runtime: int | None = None
     tagline: str = ""
-    cast: List[Dict[str, str]] = field(default_factory=list)
-    director: Optional[str] = None
+    cast: list[dict[str, str]] = field(default_factory=list)
+    director: str | None = None
 
     @property
-    def poster_url(self) -> Optional[str]:
+    def poster_url(self) -> str | None:
         if self.poster_path:
             return f"{TMDB_IMAGE_BASE_URL}/w500{self.poster_path}"
         return None
 
     @property
-    def backdrop_url(self) -> Optional[str]:
+    def backdrop_url(self) -> str | None:
         if self.backdrop_path:
             return f"{TMDB_IMAGE_BASE_URL}/w1280{self.backdrop_path}"
         return None
@@ -63,27 +98,27 @@ class TMDbTVShow:
     name: str
     original_name: str = ""
     first_air_date: str = ""
-    year: Optional[int] = None
+    year: int | None = None
     overview: str = ""
-    poster_path: Optional[str] = None
-    backdrop_path: Optional[str] = None
-    genres: List[str] = field(default_factory=list)
+    poster_path: str | None = None
+    backdrop_path: str | None = None
+    genres: list[str] = field(default_factory=list)
     rating: float = 0.0
     vote_count: int = 0
     number_of_seasons: int = 0
     number_of_episodes: int = 0
     status: str = ""  # "Returning Series", "Ended", etc.
-    cast: List[Dict[str, str]] = field(default_factory=list)
-    created_by: List[str] = field(default_factory=list)
+    cast: list[dict[str, str]] = field(default_factory=list)
+    created_by: list[str] = field(default_factory=list)
 
     @property
-    def poster_url(self) -> Optional[str]:
+    def poster_url(self) -> str | None:
         if self.poster_path:
             return f"{TMDB_IMAGE_BASE_URL}/w500{self.poster_path}"
         return None
 
     @property
-    def backdrop_url(self) -> Optional[str]:
+    def backdrop_url(self) -> str | None:
         if self.backdrop_path:
             return f"{TMDB_IMAGE_BASE_URL}/w1280{self.backdrop_path}"
         return None
@@ -102,9 +137,9 @@ class TMDbEpisode:
     season_number: int
     air_date: str = ""
     overview: str = ""
-    still_path: Optional[str] = None
+    still_path: str | None = None
     rating: float = 0.0
-    runtime: Optional[int] = None
+    runtime: int | None = None
 
 
 class TMDbAPIError(Exception):
@@ -116,8 +151,8 @@ class TMDbAPIError(Exception):
 
 class TMDbService:
     def __init__(self, api_key: str = None, language: str = None):
-        self.api_key = api_key or TMDB_API_KEY
-        self.language = language or TMDB_LANGUAGE
+        self.api_key = api_key or get_tmdb_api_key()
+        self.language = language or get_tmdb_language()
         self.base_url = TMDB_BASE_URL
         self.session = requests.Session()
 
@@ -125,8 +160,8 @@ class TMDbService:
         self._min_request_interval = 0.25
 
         # Ensure cache directories exist
-        POSTER_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        BACKDROP_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        for cache_dir in (POSTER_CACHE_DIR, BACKDROP_CACHE_DIR, STILL_CACHE_DIR):
+            cache_dir.mkdir(parents=True, exist_ok=True)
 
     def _rate_limit(self):
         # ensure rate limit of 4 requests per second
@@ -135,7 +170,7 @@ class TMDbService:
             time.sleep(self._min_request_interval - elapsed)
         self._last_request_time = time.time()
 
-    def _request(self, endpoint: str, params: Dict = None) -> Dict:
+    def _request(self, endpoint: str, params: dict = None) -> dict:
         # make request to tmdb api
         self._rate_limit()
 
@@ -165,7 +200,7 @@ class TMDbService:
 
     def search_movie(
         self, query: str, year: int = None, page: int = 1
-    ) -> List[TMDbMovie]:
+    ) -> list[TMDbMovie]:
         # search movies by title
         params = {"query": query, "page": page}
         if year:
@@ -201,7 +236,7 @@ class TMDbService:
 
     def get_movie_details(
         self, movie_id: int, include_credits: bool = True
-    ) -> Optional[TMDbMovie]:
+    ) -> TMDbMovie | None:
         # get detailed movie info by id
         try:
             append = "credits" if include_credits else ""
@@ -256,7 +291,7 @@ class TMDbService:
 
     def search_tv(
         self, query: str, year: int = None, page: int = 1
-    ) -> List[TMDbTVShow]:
+    ) -> list[TMDbTVShow]:
         # search tv shows by title
         params = {"query": query, "page": page}
         if year:
@@ -292,7 +327,7 @@ class TMDbService:
 
     def get_tv_details(
         self, tv_id: int, include_credits: bool = True
-    ) -> Optional[TMDbTVShow]:
+    ) -> TMDbTVShow | None:
         # get detailed tv show info by id
         try:
             append = "credits" if include_credits else ""
@@ -342,7 +377,7 @@ class TMDbService:
 
     def get_episode_details(
         self, tv_id: int, season: int, episode: int
-    ) -> Optional[TMDbEpisode]:
+    ) -> TMDbEpisode | None:
         try:
             data = self._request(f"/tv/{tv_id}/season/{season}/episode/{episode}")
         except TMDbAPIError as e:
@@ -364,14 +399,13 @@ class TMDbService:
         )
 
     def download_image(
-        self, image_path: str, size: str = "w500", cache_dir: Path = None
-    ) -> Optional[str]:
+        self, image_path: str, size: str = POSTER_SIZE, cache_dir: Path = None
+    ) -> str | None:
         if not image_path:
             return None
 
         cache_dir = cache_dir or POSTER_CACHE_DIR
-        filename = f"{size}{image_path.replace('/', '_')}"
-        local_path = cache_dir / filename
+        local_path = cached_image_path(image_path, size, cache_dir)
         if local_path.exists():
             logger.debug(f"Using cached image: {local_path}")
             return str(local_path)
@@ -392,17 +426,21 @@ class TMDbService:
             logger.error(f"Failed to download image {url}: {e}")
             return None
 
-    def download_poster(self, poster_path: str, size: str = "w500") -> Optional[str]:
+    def download_poster(self, poster_path: str, size: str = POSTER_SIZE) -> str | None:
         return self.download_image(poster_path, size, POSTER_CACHE_DIR)
 
     def download_backdrop(
-        self, backdrop_path: str, size: str = "w1280"
-    ) -> Optional[str]:
+        self, backdrop_path: str, size: str = BACKDROP_SIZE
+    ) -> str | None:
         return self.download_image(backdrop_path, size, BACKDROP_CACHE_DIR)
+
+    def download_still(self, still_path: str, size: str = STILL_SIZE) -> str | None:
+        """Vignette 16:9 propre à un épisode."""
+        return self.download_image(still_path, size, STILL_CACHE_DIR)
 
     def smart_search(
         self, title: str, year: int = None, media_type: str = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         if media_type == "movie":
             movies = self.search_movie(title, year)
             if movies:
@@ -437,7 +475,12 @@ class MediaMetadataEnricher:
     def __init__(self, tmdb_service: TMDbService = None):
         self.tmdb = tmdb_service or TMDbService()
 
-    def enrich_media(self, media) -> bool:
+    def enrich_media(self, media, db=None) -> bool:
+        """Enrichit `media` depuis TMDb.
+
+        Si `db` est fourni, `media` doit lui appartenir et la transaction y est
+        validée. Sinon une session temporaire est ouverte et `media` y est fusionné.
+        """
         from core.database import SessionLocal
 
         if not media.title:
@@ -448,11 +491,16 @@ class MediaMetadataEnricher:
             logger.debug(f"Media already enriched: {media.title}")
             return True
 
-        db = SessionLocal()
+        caller_session = db is not None
+        if not caller_session:
+            db = SessionLocal()
         try:
             search_title = (
                 media.series_name if media.media_type == "episode" else media.title
             )
+            if not search_title:
+                logger.warning(f"No searchable title for: {media.file_path}")
+                return False
             result = self.tmdb.smart_search(
                 search_title, year=media.year, media_type=media.media_type
             )
@@ -474,7 +522,8 @@ class MediaMetadataEnricher:
                         )
                         if episode:
                             self._apply_episode_metadata(media, episode)
-            db.merge(media)
+            if not caller_session:
+                db.merge(media)
             db.commit()
 
             logger.info(f"Enriched: {media.title} (TMDb ID: {media.tmdb_id})")
@@ -485,7 +534,8 @@ class MediaMetadataEnricher:
             logger.error(f"Failed to enrich media '{media.title}': {e}")
             return False
         finally:
-            db.close()
+            if not caller_session:
+                db.close()
 
     def _apply_movie_metadata(self, media, movie: TMDbMovie):
         media.tmdb_id = movie.tmdb_id
@@ -496,6 +546,9 @@ class MediaMetadataEnricher:
         media.backdrop_path = movie.backdrop_path
         media.genres = movie.genres_str
         media.rating = f"{movie.rating:.1f}/10"
+        # Une réponse sans générique ne doit pas effacer un casting déjà connu.
+        if movie.cast:
+            media.actors = cast_names(movie.cast)
         if movie.runtime:
             media.duration_sec = movie.runtime * 60
 
@@ -503,20 +556,69 @@ class MediaMetadataEnricher:
         media.tmdb_id = show.tmdb_id
         media.series_name = show.name
         media.year = show.year
+        # Conservé à part : `overview` sera écrasé par le résumé de l'épisode.
+        media.series_overview = show.overview
         media.overview = show.overview
         media.poster_path = show.poster_path
         media.backdrop_path = show.backdrop_path
         media.genres = show.genres_str
         media.rating = f"{show.rating:.1f}/10"
+        if show.cast:
+            media.actors = cast_names(show.cast)
 
     def _apply_episode_metadata(self, media, episode: TMDbEpisode):
         media.episode_title = episode.name
         if episode.overview:
             media.overview = episode.overview
+        if episode.still_path:
+            media.still_path = episode.still_path
         if episode.runtime:
             media.duration_sec = episode.runtime * 60
 
-    def enrich_all_media(self, limit: int = None) -> Dict[str, int]:
+    def download_artwork(self, media) -> int:
+        """Met en cache les images d'un média. Renvoie le nombre de fichiers écrits."""
+        downloaded = 0
+        for image_path, download in (
+            (media.poster_path, self.tmdb.download_poster),
+            (media.backdrop_path, self.tmdb.download_backdrop),
+            (getattr(media, "still_path", None), self.tmdb.download_still),
+        ):
+            if image_path and download(image_path):
+                downloaded += 1
+        return downloaded
+
+    def re_enrich_media(self, media, db=None) -> bool:
+        if not media.tmdb_id:
+            return False
+
+        try:
+            if media.media_type == "movie":
+                details = self.tmdb.get_movie_details(media.tmdb_id)
+                if details:
+                    self._apply_movie_metadata(media, details)
+            elif media.media_type == "episode":
+                details = self.tmdb.get_tv_details(media.tmdb_id)
+                if details:
+                    self._apply_tv_metadata(media, details)
+                    if media.season_number and media.episode_number:
+                        episode = self.tmdb.get_episode_details(
+                            media.tmdb_id, media.season_number, media.episode_number
+                        )
+                        if episode:
+                            self._apply_episode_metadata(media, episode)
+
+            if db:
+                db.commit()
+            logger.info(f"Re-enriched: {media.title} (TMDb ID: {media.tmdb_id})")
+            return True
+
+        except Exception as e:
+            if db:
+                db.rollback()
+            logger.error(f"Failed to re-enrich media '{media.title}': {e}")
+            return False
+
+    def enrich_all_media(self, limit: int = None) -> dict[str, int]:
         from core.database import SessionLocal
         from core.models import Media
 
@@ -536,7 +638,7 @@ class MediaMetadataEnricher:
             for i, media in enumerate(media_list, 1):
                 logger.info(f"[{i}/{total}] Processing: {media.title}")
 
-                if self.enrich_media(media):
+                if self.enrich_media(media, db=db):
                     stats["success"] += 1
                 else:
                     stats["failed"] += 1
@@ -546,30 +648,142 @@ class MediaMetadataEnricher:
         finally:
             db.close()
 
-    def download_all_posters(self) -> Dict[str, int]:
+    def fill_missing_details(self, progress_callback=None) -> dict[str, int]:
+        """Complète les fiches enrichies auxquelles il manque un champ.
+
+        `enrich_all_media` ne regarde que les médias sans `tmdb_id` : sans cette
+        passe, ni un champ apparu après coup (le casting) ni un champ effacé par un
+        réindexage (le titre d'épisode) ne reviendrait jamais.
+        """
+        from sqlalchemy import and_, or_
+
+        from core.database import SessionLocal
+        from core.models import Media
+
+        missing_cast = or_(Media.actors.is_(None), Media.actors == "")
+        missing_title = and_(
+            Media.media_type == "episode",
+            or_(Media.episode_title.is_(None), Media.episode_title == ""),
+        )
+
+        db = SessionLocal()
+        stats = {"repaired": 0, "failed": 0}
+
+        try:
+            media_list = (
+                db.query(Media)
+                .filter(Media.tmdb_id.isnot(None))
+                .filter(or_(missing_cast, missing_title))
+                .all()
+            )
+            total = len(media_list)
+            # Tous les épisodes d'une série partagent son tmdb_id : sans ce cache,
+            # une saison entière demanderait autant de génériques que d'épisodes.
+            casts: dict[tuple[str, int], str] = {}
+
+            for index, media in enumerate(media_list, 1):
+                if progress_callback:
+                    progress_callback(index, total, media.title or media.file_path)
+
+                repaired = False
+                if not media.actors:
+                    key = (media.media_type, media.tmdb_id)
+                    if key not in casts:
+                        casts[key] = self._fetch_cast(media)
+                    if casts[key]:
+                        media.actors = casts[key]
+                        repaired = True
+                if self._fill_episode_title(media):
+                    repaired = True
+
+                stats["repaired" if repaired else "failed"] += 1
+
+            db.commit()
+            logger.info(f"Completed {stats['repaired']} media record(s)")
+            return stats
+
+        finally:
+            # Une annulation depuis le callback traverse : close() abandonne alors
+            # la transaction, aucune ligne n'est écrite à moitié.
+            db.close()
+
+    def _fetch_cast(self, media) -> str:
+        details = (
+            self.tmdb.get_tv_details(media.tmdb_id)
+            if media.media_type == "episode"
+            else self.tmdb.get_movie_details(media.tmdb_id)
+        )
+        return cast_names(details.cast) if details else ""
+
+    def _fill_episode_title(self, media) -> bool:
+        """Redemande son titre à un épisode qui n'en a plus. Vrai s'il est revenu."""
+        if media.media_type != "episode" or media.episode_title:
+            return False
+        if not (media.season_number and media.episode_number):
+            return False
+
+        episode = self.tmdb.get_episode_details(
+            media.tmdb_id, media.season_number, media.episode_number
+        )
+        if not episode or not episode.name:
+            return False
+
+        media.episode_title = episode.name
+        return True
+
+    def download_all_artwork(self, progress_callback=None) -> dict[str, int]:
+        """Met en cache affiches, fonds d'écran et vignettes d'épisodes.
+
+        Une seule passe sur la bibliothèque : les trois types d'images étaient
+        auparavant parcourus séparément.
+        """
+        from sqlalchemy import or_
+
         from core.database import SessionLocal
         from core.models import Media
 
         db = SessionLocal()
         stats = {"downloaded": 0, "cached": 0, "failed": 0}
 
+        targets = (
+            (POSTER_SIZE, POSTER_CACHE_DIR, "poster_path", self.tmdb.download_poster),
+            (
+                BACKDROP_SIZE,
+                BACKDROP_CACHE_DIR,
+                "backdrop_path",
+                self.tmdb.download_backdrop,
+            ),
+            (STILL_SIZE, STILL_CACHE_DIR, "still_path", self.tmdb.download_still),
+        )
+
         try:
-            media_list = db.query(Media).filter(Media.poster_path.isnot(None)).all()
-
-            for media in media_list:
-                local_path = (
-                    POSTER_CACHE_DIR / f"w500{media.poster_path.replace('/', '_')}"
+            media_list = (
+                db.query(Media)
+                .filter(
+                    or_(
+                        Media.poster_path.isnot(None),
+                        Media.backdrop_path.isnot(None),
+                        Media.still_path.isnot(None),
+                    )
                 )
+                .all()
+            )
+            total = len(media_list)
 
-                if local_path.exists():
-                    stats["cached"] += 1
-                    continue
+            for index, media in enumerate(media_list, 1):
+                if progress_callback:
+                    progress_callback(index, total, media.title or media.file_path)
 
-                result = self.tmdb.download_poster(media.poster_path)
-                if result:
-                    stats["downloaded"] += 1
-                else:
-                    stats["failed"] += 1
+                for size, cache_dir, attribute, download in targets:
+                    image_path = getattr(media, attribute)
+                    if not image_path:
+                        continue
+                    if cached_image_path(image_path, size, cache_dir).exists():
+                        stats["cached"] += 1
+                    elif download(image_path):
+                        stats["downloaded"] += 1
+                    else:
+                        stats["failed"] += 1
 
             return stats
 
