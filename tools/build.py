@@ -15,6 +15,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Une console Windows en cp1252 ne sait pas écrire « ✓ » : le build allait au
+# bout puis mourait sur son propre message final, en rendant un code non nul.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(errors="replace")
+    except (AttributeError, OSError):  # flux redirigé ou déjà fermé
+        pass
+
 ROOT = Path(__file__).resolve().parent.parent
 NAME = "EpiKodi"
 ENTRY = ROOT / "main.py"
