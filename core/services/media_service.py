@@ -1,6 +1,8 @@
+import glob
 import logging
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -184,6 +186,36 @@ class MediaService:
             media.watch_count = 0
             media.resume_position = 0
             self.db.commit()
+
+    def delete_media(self, media_ids: list[int]) -> list[str]:
+        """Supprime du disque les fichiers vidéo et leurs sous-titres, puis les entrées.
+
+        Renvoie les chemins qui n'ont pas pu être supprimés (fichier verrouillé,
+        droits…) : leur entrée est gardée, sinon le prochain scan la recréerait
+        sans que l'utilisateur sache pourquoi.
+        """
+        from core.config import SUPPORTED_SUBTITLE_EXTENSIONS
+
+        failed = []
+        for media in self.db.query(Media).filter(Media.id.in_(media_ids)).all():
+            video = Path(media.file_path)
+            try:
+                video.unlink(missing_ok=True)
+            except OSError as e:
+                logger.error(f"Could not delete {video}: {e}")
+                failed.append(media.file_path)
+                continue
+            # « Film.srt », « Film.fr.srt »… mais jamais « Film.2.mkv ».
+            if video.parent.is_dir():
+                for sub in video.parent.glob(f"{glob.escape(video.stem)}.*"):
+                    if sub.suffix.lower() in SUPPORTED_SUBTITLE_EXTENSIONS:
+                        try:
+                            sub.unlink()
+                        except OSError as e:
+                            logger.warning(f"Could not delete subtitle {sub}: {e}")
+            self.db.delete(media)
+        self.db.commit()
+        return failed
 
     def add_media_directory(self, path: str, recursive: bool = True) -> MediaDirectory:
         existing = (

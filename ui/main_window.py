@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QStackedWidget,
     QVBoxLayout,
@@ -148,10 +149,12 @@ class MainWindow(QMainWindow):
         self._series_view.media_clicked.connect(self._on_media_clicked)
         self._series_view.media_play.connect(self._on_media_play)
         self._series_view.watched_toggled.connect(self._on_watched_toggled)
+        self._series_view.delete_requested.connect(self._on_delete_requested)
 
         self._detail_view = DetailView()
         self._detail_view.play_requested.connect(self._on_media_play)
         self._detail_view.back_requested.connect(self._on_detail_back)
+        self._detail_view.delete_requested.connect(self._on_delete_requested)
 
         self._player_view = PlayerView()
         self._player_view.back_requested.connect(self._on_player_back)
@@ -313,6 +316,39 @@ class MainWindow(QMainWindow):
         else:
             self._media_service.mark_as_unwatched(media_id)
         self._refresh_view(self._current_view)
+        self._update_stats_label()
+
+    def _on_delete_requested(self, media_ids: list, label: str):
+        what = f"ses {len(media_ids)} fichiers" if len(media_ids) > 1 else "le fichier"
+        reply = QMessageBox.question(
+            self,
+            "Supprimer",
+            f"Supprimer définitivement « {label} » ?\n\n"
+            f"{what.capitalize()} et les sous-titres associés seront effacés du "
+            "disque. Cette action est irréversible.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        # VLC garde le fichier ouvert, même en pause : Windows refuserait de l'effacer.
+        if self._player_view.current_media_id() in media_ids:
+            self._player_view.stop()
+
+        failed = self._media_service.delete_media(media_ids)
+        if failed:
+            QMessageBox.warning(
+                self,
+                "Suppression incomplète",
+                "Ces fichiers n'ont pas pu être supprimés :\n\n" + "\n".join(failed),
+            )
+
+        if self._current_view == VIEW_DETAIL:
+            self._on_detail_back()
+        else:
+            self._refresh_view(self._current_view)
+        self._update_resume_button()
         self._update_stats_label()
 
     def _on_playback_finished(self):

@@ -84,6 +84,10 @@ gives for the title, and the other filters still apply on top of the search.
 
 Click a poster to open its detail page, double-click to play it right away.
 
+**🗑 Delete** on the detail page erases the video file from the disk, along with its
+subtitle files, after a confirmation. It cannot be undone: the file does not go to the
+Recycle Bin.
+
 ---
 
 ## Series
@@ -106,6 +110,10 @@ or open the episode's detail page. Searching inside a series looks across every
 season, not just the one on screen.
 
 When an episode finishes, the next one in the series starts automatically.
+
+**🗑 Delete the series** erases every episode file of the show, and their subtitles,
+from the disk after a confirmation. To delete a single episode, open its detail page
+and use **🗑 Delete** there. Neither can be undone.
 
 ---
 

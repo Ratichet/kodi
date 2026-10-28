@@ -1373,6 +1373,43 @@ class TestMediaServiceWatching(unittest.TestCase):
             )
 
 
+class TestDeleteMedia(unittest.TestCase):
+    """Supprimer depuis l'interface efface le fichier, ses sous-titres et l'entrée."""
+
+    def setUp(self):
+        Base.metadata.drop_all(bind=engine)
+        Base.metadata.create_all(bind=engine)
+        self.media_dir = tempfile.mkdtemp(prefix="epikodi_delete_")
+        for name in ("Film.mkv", "Film.fr.srt", "Film.srt", "Film.2.mkv"):
+            open(os.path.join(self.media_dir, name), "w").close()
+        db = SessionLocal()
+        db.add_all(
+            [
+                Media(file_path=os.path.join(self.media_dir, "Film.mkv"), title="Film"),
+                Media(file_path=os.path.join(self.media_dir, "Film.2.mkv"), title="Film 2"),
+                Media(file_path=os.path.join(self.media_dir, "gone.mkv"), title="Gone"),
+            ]
+        )
+        db.commit()
+        self.ids = {m.title: m.id for m in db.query(Media).all()}
+        db.close()
+
+    def tearDown(self):
+        shutil.rmtree(self.media_dir, ignore_errors=True)
+
+    def test_delete_removes_files_subtitles_and_rows(self):
+        from core.services.media_service import MediaService
+
+        with MediaService() as svc:
+            failed = svc.delete_media([self.ids["Film"], self.ids["Gone"]])
+            self.assertEqual(failed, [])
+            # Un fichier déjà absent du disque n'empêche pas de retirer l'entrée.
+            self.assertEqual([m.title for m in svc.get_all_media()], ["Film 2"])
+
+        # Les sous-titres partent avec la vidéo, pas un autre film au nom proche.
+        self.assertEqual(os.listdir(self.media_dir), ["Film.2.mkv"])
+
+
 class TestLeavingThePlayer(unittest.TestCase):
     """Quitter le lecteur pour une autre vue doit rester réversible.
 

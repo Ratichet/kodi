@@ -200,6 +200,7 @@ class SeriesView(QWidget):
     media_clicked = Signal(int)
     media_play = Signal(int)
     watched_toggled = Signal(int, bool)
+    delete_requested = Signal(list, str)  # ids des épisodes, nom de la série
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -284,6 +285,11 @@ class SeriesView(QWidget):
         self._progress_label.setObjectName("subtitle")
         action_layout.addWidget(self._progress_label)
         action_layout.addStretch()
+
+        delete_btn = QPushButton("🗑  Supprimer la série")
+        delete_btn.setObjectName("secondary_button")
+        delete_btn.clicked.connect(self._delete_current)
+        action_layout.addWidget(delete_btn)
         detail_layout.addWidget(action_bar)
 
         # sélecteur de saison
@@ -511,6 +517,12 @@ class SeriesView(QWidget):
             self._episode_grid.addWidget(card)
 
         self._count.setText(f"{len(episodes)} épisode{'s' if len(episodes) != 1 else ''}")
+
+    def _delete_current(self):
+        if self._current:
+            self.delete_requested.emit(
+                [e.id for e in self._current.episodes], self._current.name
+            )
 
     def _play_next(self):
         if not self._current:

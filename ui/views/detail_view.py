@@ -245,6 +245,7 @@ class EpisodeRow(QFrame):
 class DetailView(QScrollArea):
     play_requested = Signal(int)
     back_requested = Signal()
+    delete_requested = Signal(list, str)  # ids des médias, libellé pour la confirmation
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -286,6 +287,11 @@ class DetailView(QScrollArea):
         self._btn_watched.setObjectName("secondary_button")
         self._btn_watched.clicked.connect(self._toggle_watched)
         btn_layout.addWidget(self._btn_watched)
+
+        self._btn_delete = QPushButton("🗑  Supprimer")
+        self._btn_delete.setObjectName("secondary_button")
+        self._btn_delete.clicked.connect(self._on_delete)
+        btn_layout.addWidget(self._btn_delete)
 
         btn_layout.addStretch()
 
@@ -385,6 +391,10 @@ class DetailView(QScrollArea):
     def _on_play(self):
         if self._media:
             self.play_requested.emit(self._media.id)
+
+    def _on_delete(self):
+        if self._media:
+            self.delete_requested.emit([self._media.id], self._media.display_title)
 
     def _toggle_watched(self):
         if not self._media or not self._media_service:
