@@ -7,7 +7,7 @@ from typing import Any
 import requests
 
 from core.config import (
-    BASE_DIR,
+    CACHE_DIR,
     TMDB_BASE_URL,
     TMDB_IMAGE_BASE_URL,
     get_tmdb_api_key,
@@ -16,10 +16,11 @@ from core.config import (
 
 logger = logging.getLogger(__name__)
 
-# cache directories for pictures
-POSTER_CACHE_DIR = BASE_DIR / "cache" / "posters"
-BACKDROP_CACHE_DIR = BASE_DIR / "cache" / "backdrops"
-STILL_CACHE_DIR = BASE_DIR / "cache" / "stills"
+# CACHE_DIR et non BASE_DIR : gelé, BASE_DIR est le dossier _internal de l'exe,
+# effacé à chaque rebuild et en lecture seule une fois installé.
+POSTER_CACHE_DIR = CACHE_DIR / "posters"
+BACKDROP_CACHE_DIR = CACHE_DIR / "backdrops"
+STILL_CACHE_DIR = CACHE_DIR / "stills"
 
 POSTER_SIZE = "w500"
 BACKDROP_SIZE = "w1280"
