@@ -2320,6 +2320,163 @@ class TestArchiveExtraction(unittest.TestCase):
         self.assertIn("Archive", download.error)
 
 
+class TestUpdater(unittest.TestCase):
+    """Mise à jour automatique : la release GitHub est simulée en local."""
+
+    @classmethod
+    def setUpClass(cls):
+        import json
+        import threading
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+
+        class Handler(BaseHTTPRequestHandler):
+            release = None  # None : l'API répond 404, aucune release publiée
+            payload = b""
+
+            def do_GET(self):
+                if self.path == "/latest":
+                    if Handler.release is None:
+                        self.send_response(404)
+                        self.end_headers()
+                        return
+                    body = json.dumps(Handler.release).encode()
+                else:
+                    body = Handler.payload
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        cls.handler = Handler
+        cls.server = HTTPServer(("127.0.0.1", 0), Handler)
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+        cls.base_url = f"http://127.0.0.1:{cls.server.server_port}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.thread.join(timeout=5)
+
+    def setUp(self):
+        from pathlib import Path
+
+        from core.services import updater
+
+        self.updater = updater
+        self.directory = Path(tempfile.mkdtemp(prefix="epikodi_update_"))
+        self.addCleanup(shutil.rmtree, self.directory, ignore_errors=True)
+        for name, value in (
+            ("RELEASES_URL", self.base_url + "/latest"),
+            ("UPDATE_DIR", self.directory / "update"),
+        ):
+            self.addCleanup(setattr, updater, name, getattr(updater, name))
+            setattr(updater, name, value)
+        self.handler.release = None
+
+    def _publish(self, tag: str):
+        self.handler.release = {
+            "tag_name": tag,
+            "assets": [
+                {"name": "EpiKodi-linux", "browser_download_url": "ailleurs"},
+                {
+                    "name": f"EpiKodi-{tag}-windows.zip",
+                    "browser_download_url": self.base_url + "/asset.zip",
+                    "size": 3,
+                },
+            ],
+        }
+
+    def test_a_newer_release_is_offered(self):
+        from core.config import APP_VERSION
+
+        major, minor, patch = (int(n) for n in APP_VERSION.split("."))
+        self._publish(f"v{major}.{minor}.{patch + 1}")
+
+        release = self.updater.check()
+
+        self.assertEqual(release.version, f"{major}.{minor}.{patch + 1}")
+        self.assertEqual(release.url, self.base_url + "/asset.zip")
+
+    def test_the_same_or_an_older_release_is_ignored(self):
+        from core.config import APP_VERSION
+
+        self._publish(f"v{APP_VERSION}")
+        self.assertIsNone(self.updater.check())
+        self._publish("v0.9.99")
+        self.assertIsNone(self.updater.check())
+
+    def test_no_release_at_all(self):
+        self.assertIsNone(self.updater.check())
+
+    def test_download_unpacks_the_application_folder(self):
+        import io
+        import zipfile
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as bundle:
+            bundle.writestr("EpiKodi/EpiKodi.exe", b"exe")
+            bundle.writestr("EpiKodi/_internal/lib.dll", b"dll")
+        self.handler.payload = buffer.getvalue()
+        seen = []
+
+        staging = self.updater.download(
+            self.updater.Release("9.9.9", self.base_url + "/asset.zip", 0),
+            progress=lambda received, total: seen.append((received, total)),
+        )
+
+        self.assertTrue((staging / "EpiKodi.exe").is_file())
+        self.assertTrue((staging / "_internal" / "lib.dll").is_file())
+        self.assertEqual(seen[-1], (len(self.handler.payload),) * 2)
+
+    def test_an_archive_without_the_application_is_refused(self):
+        import io
+        import zipfile
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as bundle:
+            bundle.writestr("autre.txt", b"rien")
+        self.handler.payload = buffer.getvalue()
+
+        with self.assertRaises(self.updater.UpdateError):
+            self.updater.download(
+                self.updater.Release("9.9.9", self.base_url + "/asset.zip", 0)
+            )
+
+    @unittest.skipUnless(sys.platform == "win32", "robocopy et PowerShell : Windows")
+    def test_install_script_mirrors_the_new_version(self):
+        """Le script remplace le dossier : fichiers périmés retirés, nouveaux posés."""
+        import subprocess
+
+        staging = self.directory / "update" / "EpiKodi"
+        target = self.directory / "installed"
+        (staging / "_internal").mkdir(parents=True)
+        (target / "_internal").mkdir(parents=True)
+        (target / "_internal" / "obsolete.dll").write_bytes(b"old")
+        (staging / "_internal" / "new.dll").write_bytes(b"new")
+        # Relancé à la fin du script : un vrai programme, inoffensif et bref.
+        windows = os.environ.get("SystemRoot", r"C:\Windows")
+        shutil.copy(os.path.join(windows, "System32", "hostname.exe"), staging / "EpiKodi.exe")
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+
+        script = self.updater.write_install_script(staging, target, gone.pid)
+        subprocess.run(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)],
+            timeout=60,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+
+        self.assertTrue((target / "_internal" / "new.dll").is_file())
+        self.assertFalse((target / "_internal" / "obsolete.dll").exists())
+        self.assertTrue((target / "EpiKodi.exe").is_file())
+        self.assertFalse(staging.exists(), "le dossier de transit aurait dû partir")
+
+
 class TestOneFichierLinks(unittest.TestCase):
     """Résolution d'un lien d'hébergeur avant le transfert.
 

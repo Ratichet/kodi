@@ -6,6 +6,9 @@ import sys
 from pathlib import Path
 
 APP_NAME = "EpiKodi"
+# Doit valoir le tag de la release sans son « v » : la CD refuse de publier
+# sinon, et la mise à jour automatique compare cette valeur au dernier tag.
+APP_VERSION = "1.1.0"
 
 logger = logging.getLogger(__name__)
 

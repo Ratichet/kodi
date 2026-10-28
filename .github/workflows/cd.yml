@@ -31,16 +31,34 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      # La mise à jour automatique compare APP_VERSION au tag : un écart ferait
+      # proposer la même mise à jour à chaque lancement.
+      - name: Check version matches tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $version = python -c "from core.config import APP_VERSION; print(APP_VERSION)"
+          if ("v$version" -ne "${{ github.ref_name }}") {
+            throw "APP_VERSION ($version) ne correspond pas au tag ${{ github.ref_name }}"
+          }
+
       # Même script qu'en local : les options PyInstaller ne vivent qu'à un endroit.
+      # Un dossier plutôt qu'un exécutable unique : démarrage rapide, et c'est le
+      # format que la mise à jour automatique sait remplacer.
       - name: Build with PyInstaller
         shell: pwsh
-        run: python tools/build.py
+        run: python tools/build.py --onedir
+
+      # Racine de l'archive = dossier EpiKodi/, attendu par core/services/updater.py.
+      - name: Zip the application folder
+        shell: pwsh
+        run: python -c "import shutil; shutil.make_archive('dist/EpiKodi-windows', 'zip', 'dist', 'EpiKodi')"
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: EpiKodi-windows
-          path: dist/EpiKodi.exe
+          path: dist/EpiKodi-windows.zip
 
   build-linux:
     name: Build Linux
@@ -102,7 +120,7 @@ jobs:
       - name: Rename artifacts with version
         run: |
           TAG=${GITHUB_REF_NAME}
-          mv release/EpiKodi.exe release/EpiKodi-${TAG}-windows.exe
+          mv release/EpiKodi-windows.zip release/EpiKodi-${TAG}-windows.zip
           mv release/EpiKodi     release/EpiKodi-${TAG}-linux
 
       - name: Extract changelog for this version
@@ -128,5 +146,5 @@ jobs:
           draft: false
           prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
           files: |
-            release/EpiKodi-*-windows.exe
+            release/EpiKodi-*-windows.zip
             release/EpiKodi-*-linux

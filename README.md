@@ -225,6 +225,26 @@ Elle est entièrement tracée à partir de la charte de `ui/styles.py` (le ⬡ d
 latérale, l'accent `#e94560`) et écrite en sept tailles, de 16 à 256 pixels : aucune
 image extérieure n'entre dans le paquet.
 
+### Publier une version et mise à jour automatique
+
+1. Monter `APP_VERSION` dans `core/config.py` (ex. `1.2.0`).
+2. Commiter, puis pousser un tag identique préfixé de `v` :
+   `git tag v1.2.0 && git push origin v1.2.0`.
+
+Le workflow de release refuse un tag qui ne correspond pas à `APP_VERSION`. Pour
+Windows, il publie `EpiKodi-v1.2.0-windows.zip` : le dossier `--onedir` zippé.
+
+Au lancement, l'application Windows installée en dossier (`EpiKodi.exe` à côté de
+`_internal/`) interroge la dernière release GitHub. Si elle est plus récente, elle
+propose de l'installer, la télécharge dans `%LOCALAPPDATA%\EpiKodi\update`, puis se
+ferme. Un script PowerShell attend la fin du processus, recopie le nouveau dossier en
+miroir (`robocopy /MIR`) et relance l'application. Le journal de la copie reste dans
+`update\install.log`. Hors ligne, la vérification est simplement sautée.
+
+Ne se mettent pas à jour seuls : le lancement depuis les sources, l'exécutable unique
+(`--onefile`) et Linux. La vérification lit l'API GitHub sans authentification, ce qui
+suppose un dépôt public.
+
 ### Tests
 
 ```bash
@@ -239,5 +259,5 @@ jamais `epikodi.db`.
 * `core/` : Logique métier, modèles de données et services API.
 * `ui/` : Définition de l'interface utilisateur et des vues.
 * `ui/widgets/` : Composants réutilisables (grilles, cartes, lecteur).
-* `cache/` : Stockage local des affiches et images.
-* `epikodi.db` : Base SQLite locale (bibliothèque, progression de lecture).
+* `cache/`, `epikodi.db`, `settings.json` : affiches, bibliothèque et réglages. Dans le
+  dépôt en développement, dans `%LOCALAPPDATA%\EpiKodi` pour l'application installée.

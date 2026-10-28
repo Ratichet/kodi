@@ -167,6 +167,18 @@ the position is saved, so the title still shows up under *Continue watching*.
 
 ---
 
+## Updates
+
+At startup EpiKodi checks whether a newer version has been published. If so, it asks
+before doing anything: accept, and it downloads the update with a progress bar, closes,
+replaces itself and starts again on the new version. Your library, settings and posters
+are kept. Decline, and you will be asked again at the next launch. Without an internet
+connection the check is silently skipped.
+
+This works for the Windows folder version (`EpiKodi.exe` next to an `_internal` folder).
+
+---
+
 ## Troubleshooting
 
 | Problem | Solution |

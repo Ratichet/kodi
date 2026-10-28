@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 from core.config import ICON_FILE
 from core.services.media_service import MediaService
 from ui.styles import get_dark_theme
+from ui.update_prompt import UpdatePrompt
 from ui.views.detail_view import DetailView
 from ui.views.downloads_view import DownloadsView
 from ui.views.home_view import HomeView
@@ -195,6 +196,9 @@ class MainWindow(QMainWindow):
         self._watch_refresh_timer.timeout.connect(self._refresh_all_views)
         self.library_changed_on_disk.connect(self._watch_refresh_timer.start)
         self._start_watching()
+
+        self._updates = UpdatePrompt(self)
+        self._updates.check_in_background()
 
         # closeEvent n'est pas garanti : QApplication.quit(), une fin de session ou
         # un dernier widget fermé autrement sortent de la boucle sans lui. Or laisser
