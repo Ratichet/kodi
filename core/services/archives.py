@@ -1,11 +1,16 @@
 """Décompression des archives téléchargées.
 
-Seul le format ZIP est traité, avec la bibliothèque standard : RAR et 7z
-demanderaient un exécutable externe, que l'application ne peut pas garantir.
+Le ZIP passe par la bibliothèque standard. Le RAR passe par bsdtar, livré avec
+Windows 10 et 11 (`tar.exe` de System32) : aucun outil à installer. Le 7z n'est
+pas traité.
 """
 
+import locale
 import logging
+import os
 import shutil
+import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
@@ -17,7 +22,7 @@ class ArchiveError(Exception):
 
 
 def is_archive(path) -> bool:
-    return Path(path).suffix.lower() == ".zip"
+    return Path(path).suffix.lower() in (".zip", ".rar")
 
 
 def extract(archive_path, destination=None) -> list[str]:
@@ -29,6 +34,8 @@ def extract(archive_path, destination=None) -> list[str]:
     """
     archive = Path(archive_path)
     destination = Path(destination) if destination else archive.parent
+    if archive.suffix.lower() == ".rar":
+        return _extract_rar(archive, destination)
     written = []
 
     try:
@@ -59,6 +66,72 @@ def extract(archive_path, destination=None) -> list[str]:
 
     logger.info(f"Extracted {len(written)} file(s) from {archive.name}")
     return written
+
+
+def _bsdtar() -> str | None:
+    # Le tar de Git Bash, souvent avant celui de Windows dans le PATH, est un GNU
+    # tar : il ne lit pas le RAR.
+    if sys.platform == "win32":
+        windows = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+        system_tar = windows / "System32" / "tar.exe"
+        if system_tar.is_file():
+            return str(system_tar)
+    return shutil.which("bsdtar")
+
+
+def _extract_rar(archive: Path, destination: Path) -> list[str]:
+    """bsdtar refuse seul les entrées « .. » ou absolues ; -k garde l'existant.
+
+    Une entrée refusée fait échouer l'extraction : l'archive est alors conservée
+    et le message affiché, même si les autres fichiers sont déjà en place.
+    """
+    # ponytail: pas de contrôle d'espace libre, bsdtar n'annonce les tailles qu'en
+    # texte formaté ; un disque plein se solde par une erreur d'extraction.
+    tar = _bsdtar()
+    if tar is None:
+        raise ArchiveError("Archive RAR non prise en charge : bsdtar introuvable.")
+
+    # Sans ce drapeau, l'exécutable gelé (sans console) ferait clignoter une fenêtre.
+    no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+    def run(*args):
+        return subprocess.run(
+            [tar, *args, "-f", str(archive)],
+            cwd=destination,
+            capture_output=True,
+            creationflags=no_window,
+        )
+
+    listing = run("-t")
+    if listing.returncode != 0:
+        raise ArchiveError(f"Archive illisible : {_last_line(listing.stderr)}")
+    targets = [
+        destination / name
+        for name in _decode(listing.stdout).splitlines()
+        if name and not name.endswith("/")
+    ]
+    already_there = {target for target in targets if target.exists()}
+
+    result = run("-x", "-k")
+    if result.returncode != 0:
+        raise ArchiveError(f"Extraction impossible : {_last_line(result.stderr)}")
+
+    written = [str(t) for t in targets if t not in already_there and t.exists()]
+    logger.info(f"Extracted {len(written)} file(s) from {archive.name}")
+    return written
+
+
+def _decode(output: bytes) -> str:
+    # bsdtar écrit dans la page de code ANSI sous Windows (cp1252 : « Amélie »).
+    return output.decode(locale.getpreferredencoding(False), "replace")
+
+
+def _last_line(stderr: bytes) -> str:
+    lines = _decode(stderr).strip().splitlines()
+    # La dernière ligne de bsdtar est souvent « Error exit delayed… » : la cause
+    # est juste avant.
+    useful = [line for line in lines if "Error exit delayed" not in line]
+    return (useful or lines or ["erreur inconnue"])[-1]
 
 
 def _safe_target(member, destination: Path):

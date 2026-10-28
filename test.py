@@ -2090,8 +2090,45 @@ class TestDownloadQueue(unittest.TestCase):
         self.assertFalse(self.service.destination_is_watched())
 
 
+def _make_rar(entries: dict) -> bytes:
+    """RAR 4 sans compression, assez pour bsdtar. Clés : chemins séparés par « \\ ».
+
+    Aucun outil libre ne crée de RAR : on écrit les blocs à la main.
+    """
+    import struct
+    import zlib
+
+    def block(head_type, flags, body):
+        rest = struct.pack("<BHH", head_type, flags, 7 + len(body)) + body
+        return struct.pack("<H", zlib.crc32(rest) & 0xFFFF) + rest
+
+    out = b"Rar!\x1a\x07\x00" + block(0x73, 0, b"\x00" * 6)
+    for name, data in entries.items():
+        raw = name.encode()
+        header = struct.pack(
+            "<IIBIIBBHI",
+            len(data),  # taille compressée
+            len(data),  # taille réelle
+            2,  # système hôte : Windows
+            zlib.crc32(data),
+            0x5A210000,  # date DOS
+            20,  # version requise
+            0x30,  # méthode « store »
+            len(raw),
+            0x20,  # attribut « archive »
+        )
+        out += block(0x74, 0x8000, header + raw) + data
+    return out + block(0x7B, 0x4000, b"")
+
+
+def _bsdtar_available() -> bool:
+    from core.services.archives import _bsdtar
+
+    return _bsdtar() is not None
+
+
 class TestArchiveExtraction(unittest.TestCase):
-    """Décompression d'un ZIP téléchargé, puis suppression de l'archive."""
+    """Décompression d'un ZIP ou d'un RAR téléchargé, puis suppression de l'archive."""
 
     @classmethod
     def setUpClass(cls):
@@ -2228,6 +2265,59 @@ class TestArchiveExtraction(unittest.TestCase):
 
         self.assertTrue(os.path.exists(download.file_path))
         self.assertFalse(os.path.exists(os.path.join(self.directory, "Film.mkv")))
+
+    def _serve_rar(self, entries: dict):
+        self.handler.payload = _make_rar(entries)
+
+    @unittest.skipUnless(_bsdtar_available(), "bsdtar absent : RAR non testable")
+    def test_a_downloaded_rar_is_extracted_then_removed(self):
+        self._serve_rar({"Film.mkv": b"video", "Serie.S01\\S01E01.mkv": b"ep"})
+
+        download = self._download("/Pack.rar")
+
+        self.assertEqual(download.status, "done")
+        self.assertIsNone(download.error)
+        with open(os.path.join(self.directory, "Film.mkv"), "rb") as f:
+            self.assertEqual(f.read(), b"video")
+        self.assertTrue(
+            os.path.exists(os.path.join(self.directory, "Serie.S01", "S01E01.mkv"))
+        )
+        self.assertFalse(os.path.exists(download.file_path), "le RAR aurait dû partir")
+
+    @unittest.skipUnless(_bsdtar_available(), "bsdtar absent : RAR non testable")
+    def test_an_existing_file_is_left_alone_in_a_rar(self):
+        existing = os.path.join(self.directory, "Film.mkv")
+        with open(existing, "wb") as f:
+            f.write(b"la mienne")
+        self._serve_rar({"Film.mkv": b"celle de l'archive"})
+
+        download = self._download("/Pack.rar")
+
+        self.assertIsNone(download.error)
+        with open(existing, "rb") as f:
+            self.assertEqual(f.read(), b"la mienne")
+
+    @unittest.skipUnless(_bsdtar_available(), "bsdtar absent : RAR non testable")
+    def test_a_rar_entry_escaping_the_destination_is_refused(self):
+        self._serve_rar({"..\\evade.mkv": b"bad", "Film.mkv": b"video"})
+
+        download = self._download("/Pack.rar")
+
+        escaped = os.path.join(os.path.dirname(self.directory), "evade.mkv")
+        self.assertFalse(os.path.exists(escaped), "l'entrée est sortie du dossier")
+        # L'archive suspecte reste là, avec le motif sur sa ligne.
+        self.assertTrue(os.path.exists(download.file_path))
+        self.assertIn("..", download.error)
+
+    @unittest.skipUnless(_bsdtar_available(), "bsdtar absent : RAR non testable")
+    def test_a_corrupt_rar_keeps_the_file_and_explains(self):
+        self.handler.payload = b"ceci n'est pas une archive"
+
+        download = self._download("/Pack.rar")
+
+        self.assertEqual(download.status, "done")
+        self.assertTrue(os.path.exists(download.file_path))
+        self.assertIn("Archive", download.error)
 
 
 class TestOneFichierLinks(unittest.TestCase):

@@ -64,12 +64,15 @@ de la bibliothèque :
   surveillance de dossier ignore un téléchargement en cours ; le renommage final est
   atomique.
 
-* **Archives :** un `.zip` téléchargé est extrait sur place puis supprimé, l'arborescence
-  interne conservée. Une entrée qui chercherait à sortir du dossier de destination
-  (`../ailleurs`) est ignorée, un fichier déjà présent n'est pas écrasé, et l'espace
-  disque est vérifié avant de commencer. Si l'archive est illisible, le fichier
-  téléchargé est conservé tel quel et le motif s'affiche sur sa ligne. RAR et 7z ne sont
-  pas pris en charge : ils demanderaient un exécutable externe.
+* **Archives :** un `.zip` ou un `.rar` téléchargé est extrait sur place puis supprimé,
+  l'arborescence interne conservée. Un fichier déjà présent n'est pas écrasé. Si
+  l'archive est illisible, le fichier téléchargé est conservé tel quel et le motif
+  s'affiche sur sa ligne. Le ZIP passe par la bibliothèque standard : une entrée qui
+  chercherait à sortir du dossier (`../ailleurs`) est ignorée et l'espace disque est
+  vérifié avant de commencer. Le RAR passe par le `tar.exe` (bsdtar) livré avec
+  Windows 10 et 11, sans rien à installer : une entrée `../` y fait échouer
+  l'extraction et l'archive est gardée. Les RAR en plusieurs volumes (`.part1.rar`…)
+  et le 7z ne sont pas pris en charge.
 * **Liens d'hébergeur :** certaines adresses désignent une page et non le fichier. Un
   résolveur les échange contre un lien direct auprès de l'API de l'hébergeur, avec les
   identifiants de l'utilisateur, avant chaque tentative — ces liens étant à usage

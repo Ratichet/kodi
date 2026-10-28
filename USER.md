@@ -56,10 +56,11 @@ own. If the destination is not watched, the screen says so in red.
 * Files being downloaded are named `*.part` and are invisible to the library until they
   are complete, so downloading straight into a watched folder is safe.
 
-**ZIP archives** are unpacked where they land and the archive is then deleted, keeping
-any folder structure inside. Files already present are kept, not overwritten. If the
-archive turns out to be unreadable the download itself is kept and the reason is shown
-on its line. RAR and 7z are not handled.
+**ZIP and RAR archives** are unpacked where they land and the archive is then deleted,
+keeping any folder structure inside. Files already present are kept, not overwritten. If
+the archive turns out to be unreadable the download itself is kept and the reason is
+shown on its line. RAR uses the `tar` tool built into Windows 10 and 11, nothing to
+install. Multi-part RAR (`.part1.rar`, `.part2.rar`…) and 7z are not handled.
 
 **1fichier links** point at a page, not at the file, so they need an API key (paid
 account) entered once in **⚙ Settings → Téléchargements**. EpiKodi then exchanges the
